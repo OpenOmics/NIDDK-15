@@ -1,14 +1,14 @@
 <div align="center">
    
-  <h1>IC-123 🔬</h1>
+  <h1>NIDDK-15 🔬</h1>
   
-  **_Data and script for processing IC-123_**
+  **_Data and script for processing NIDDK-15_**
 
 </div>
 
 # Overview
 
-This repository contains data and scripts for analyzing IC-123. 
+This repository contains data and scripts for analyzing NIDDK-15. 
 
 Any data accompanying this project can be stored in the `data/` directory, while any scripts used to process the data can be stored in the `scripts/` directory.
 
@@ -22,7 +22,7 @@ Any data accompanying this project can be stored in the `data/` directory, while
 > ```
 
 <!--
-Please add some more information about the project here. This can be copied directly from the project description. Also please update any references to IC-123 to the correct project identifer. For example: NCBR-123, NHLBI-123, NIAMS-123, etc. 
+Please add some more information about the project here. This can be copied directly from the project description. Also please update any references to NIDDK-15 to the correct project identifer. For example: NCBR-123, NHLBI-123, NIAMS-123, etc. 
 
 The easiest way to do this is with sed or find/replace in your text editor. Please feel free to also delete or keep any in this file. This is just a template to get you started, and you can modify it as needed. At the end of the day, this is your project and you can structure it however you like!
 
@@ -30,12 +30,12 @@ The easiest way to do this is with sed or find/replace in your text editor. Plea
 # On biowulf/helix,
 # Example sed commnad on linux,
 # this can be run on Biowulf
-sed -i 's/IC-123/NCBR-123/g' README.md
+sed -i 's/NIDDK-15/NCBR-123/g' README.md
 
 # On local laptop,
 # Example sed on macOSX,
 # this can be run on your local machine
-sed -i '' 's/IC-123/NCBR-123/g' README.md
+sed -i '' 's/NIDDK-15/NCBR-123/g' README.md
 ```
 -->
 
@@ -46,8 +46,8 @@ To install the repository locally, you can use the following command:
 ```bash
 # Clone the github repository
 # and change your working directory
-git clone https://github.com/OpenOmics/IC-123.git
-cd IC-123/
+git clone https://github.com/OpenOmics/NIDDK-15.git
+cd NIDDK-15/
 ```
 
 ## Setup your environment
