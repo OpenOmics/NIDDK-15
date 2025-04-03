@@ -1,0 +1,71 @@
+---
+title: "NIDDK-15 scRNA-seq: Preliminary Report for Pseudobulk PCA Plots"
+author: "Anshu Deewan and Vicky Chen"
+date: "`r Sys.Date()`"
+output:
+    html_document:
+        toc: true
+        toc_float:
+            collapsed: false
+        number_sections: false
+        code-fold: true
+        toc_depth: 3
+        fig_height: 5
+        fig_width: 6
+---
+
+<style>
+table {
+white-space: nowrap;
+}
+</style>
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include=TRUE, message=FALSE, warning=FALSE, error=TRUE)
+```
+
+```{r libraries}
+library(knitr)
+library(dplyr)
+library(stringr)
+library(DT)
+library(magrittr)
+library(tidyverse)
+
+dir <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/libra/pca"
+skip_timepoints <- c('0_Pre')
+
+```
+
+# PCA Plot
+
+Prinicpal component analysis was performed on the pseudo-bulk representation of each patient in each timepoint for each of the different general cell types (level 1 calls from Azimuth). The "others" label was excluded from analysis because there would be less than 100 cells called of this type, which makes it less reliable for this type of analysis. 
+
+```{r, results='asis'}
+files <- Sys.glob('/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/libra/pca/*Flare.png')
+timepoints <- unique(sapply(files, function(x) paste(strsplit(basename(x), '_')[[1]][1:2], collapse='_')))
+
+for (timepoint in timepoints) {
+  if (!timepoint %in% skip_timepoints) {
+  cat("## ", timepoint, '{.tabset}') 
+  cat('\n')
+  cat('\n')
+  
+  for (filename in grep('other_', grep(timepoint, files, value=TRUE), value=TRUE, invert=TRUE)) {
+    celltype <- gsub('_colorbyFlare', '', gsub(paste0(timepoint, '_'), '', tools::file_path_sans_ext(basename(filename))))
+    if (celltype == 'allcelltypes') {
+      celltype <- "All Cell Types"
+      filename <- gsub('Flare', 'CellType', filename) 
+    }
+    cat("### ", celltype)
+    cat('\n')
+    cat('\n')
+    cat(paste0("![](", filename, ")\n"))
+    cat("\n")
+  }
+}
+} 
+
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>

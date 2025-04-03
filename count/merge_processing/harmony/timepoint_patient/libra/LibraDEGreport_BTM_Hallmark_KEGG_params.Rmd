@@ -1,0 +1,266 @@
+---
+title: "NIDDK-15 scRNA-seq: Preliminary Report for `r gsub('vs', ' vs ', params$comparison)` in `r params$timepoint`"
+subtitle: "Analysis 1: Pseudo-bulk gene expression and enrichment analysis"
+author: "Anshu Deewan and Vicky Chen"
+date: "`r Sys.Date()`"
+output:
+    html_document:
+        toc: true
+        toc_float:
+            collapsed: false
+        number_sections: false
+        code-fold: true
+        toc_depth: 3
+        fig_height: 5
+        fig_width: 6
+params:
+    libradir: libra_deg
+    enrichdir: libra_enrich
+    timepoint: timepoint
+    comparison: comparison
+    groupinfo: groupinfo
+---
+
+<style>
+table {
+white-space: nowrap;
+}
+</style>
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include=TRUE, message=FALSE, warning=FALSE, error=TRUE)
+```
+
+```{r libraries}
+library(knitr)
+library(dplyr)
+library(stringr)
+library(DT)
+library(magrittr)
+library(tidyverse)
+
+dir <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/analysis1/nebulatry1/"
+
+celltypes.list <- c("NK", "CD14_Mono", "CD16_Mono", "NK_CD56bright", "NK_Proliferating", "MAIT")
+thresholds <- c("log2FC0.4-Pct0.1", "log2FC0.5-Pct0.1", "log2FC0.6-Pct0.1", "log2FC0.6-Pct0.2")
+
+group1 <- strsplit(params$comparison, 'vs')[[1]][[1]]
+group2 <- strsplit(params$comparison, 'vs')[[1]][[2]]
+
+info <- read.table(params$groupinfo, sep='\t', header=TRUE)
+info$Timepoint <- gsub('._', '', info$Timepoint)
+```
+
+```{r, include=FALSE}
+# Init Step to make sure that the dependencies are loaded
+dir <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/analysis1/nebulatry1/"
+data <- read.csv(Sys.glob(paste0(params$libradir, "*.csv"))[[1]])
+htmltools::tagList(DT::datatable(data))
+dataloc <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/analysis1/Analysis1_CellType_Count_Group.csv"
+data2 <- read.csv(dataloc)
+htmltools::tagList(DT::datatable(data2))
+
+```
+
+Group `r group1` is comprised of:
+
+Patients: `r info %>% filter(Timepoint == params$timepoint & Group == group1) %>% pull(Patients)`
+
+Samples: `r info %>% filter(Timepoint == params$timepoint & Group == group1) %>% pull(Samples)`
+
+
+
+Group `r group2` is comprised of:
+
+Patients: `r info %>% filter(Timepoint == params$timepoint & Group == group2) %>% pull(Patients)`
+
+Samples: `r info %>% filter(Timepoint == params$timepoint & Group == group2) %>% pull(Samples)`
+
+# Differential Gene Expression
+
+Differentially expressed genes were calculated using DESeq2-LRT with each patient being treated as a replicate and all cell types being compared at once as one bulk sample. The comparison was between group `r group1` and group `r group2`. The genes that are listed with a positive fold change are more highly expressed in group `r group1`, while the genes that are listed with a negative fold change are more highly expressed in group `r group2`.
+
+```{r, results='asis'}
+filename <- file.path(params$libradir, paste0(params$timepoint, "_label-", params$comparison, "_replicate-cr.patient_celltype-bulk_method-DESeq2-LRT_alldegs.csv"))
+data <- read.csv(filename, row.names=1)
+htmltools::tagList(DT::datatable(data[!is.na(data$p_val),],
+                                 rownames=F,
+                                 autoHideNavigation = T,
+                                 extensions = c("Buttons", "FixedColumns", "FixedHeader"),
+                                 options = list(scrollX = TRUE,
+                                                autowidth = TRUE,
+                                                pageLength = 10,
+                                                #dom = 'Bfrtip',
+                                                buttons = c('copy', 'csv', 'excel'),
+                                                fixedColumns = list(leftColumns = 1))))
+
+```
+
+# BTM Enrichment {.tabset}
+```{r, results='asis'}
+
+filenames <- Sys.glob(file.path(params$enrichdir, '*', "counts.csv"))
+folders <- unique(basename(dirname(filenames)))
+for (folder in str_sort(folders)) {
+  cat("##", strsplit(folder, '_')[[1]][1], strsplit(folder, '_')[[1]][2], "{.tabset}")
+  cat("\n\n")
+  counts <- read.csv(file.path(params$enrichdir, folder, "counts.csv"), row.names=1)
+  cat("The number of genes that passed the adjusted p-value threshold of", gsub("pvaladj", "", strsplit(folder, '_')[[1]][2]), "and log2 fold change threshold of", gsub("log2FC", "", strsplit(folder, '_')[[1]][1]), "to be used for enrichment are:\n\n")
+  cat("Up:", counts[[grep(paste0("X", params$timepoint, "_label.", params$comparison), grep("up", grep('bulk', grep("DESeq2.LRT", colnames(counts), value=TRUE), value=TRUE), value=TRUE), value=TRUE)]], "\n\n")
+  cat("Down:", counts[[grep(paste0("X", params$timepoint, "_label.", params$comparison), grep("down", grep('bulk', grep("DESeq2.LRT", colnames(counts), value=TRUE), value=TRUE), value=TRUE), value=TRUE)]], "\n\n")
+  for (direction in c("Up", "Down")) {
+    filenames <- Sys.glob(file.path(params$enrichdir, '*', paste0(timepoint, '_label-', comparison, '*celltype-bulk_method-DESeq2-LRT*enricher.BTM*', direction, '*')))
+    if (length(filenames) > 0){
+      cat("###", direction, "regulation {.tabset}")
+      cat("\n\n")
+      
+      cat("#### Datatables\n\n")
+      data <- read.csv(grep('csv', grep(folder, filenames, value=TRUE), value=TRUE), row.names=1)
+      
+      cat("\n\n")
+      print(htmltools::tagList(DT::datatable(data,
+                                             rownames=F, autoHideNavigation = T,
+                                             options = list(scrollX = TRUE,
+                                                            autowidth = TRUE,
+                                                            pageLength = 10,
+                                                            #dom = 'Bfrtip',
+                                                            buttons = c('copy', 'csv', 'excel'),
+                                                            fixedColumns = list(leftColumns = 1)))))
+      cat("\n")
+      
+      if(length(grep('DotPlot.png', grep(folder, filenames, value=TRUE), value=TRUE)) > 0) {
+        cat('#### Dot Plot\n\n')
+        figname <- grep('DotPlot.png', grep(folder, filenames, value=TRUE), value=TRUE)
+        cat(paste0("![](", figname, ")\n"))
+        cat("\n")
+      }
+    }
+  }
+  filenames <- Sys.glob(file.path(params$enrichdir, folder, paste0(timepoint, '_label-', comparison, '*celltype-bulk_method-DESeq2-LRT*enricher.BTM.BarPlot.png')))
+  if (length(filenames) > 0) {
+    cat("### Bar Plot")
+    cat("\n\n")
+    cat("The bar plot is generated by taking the significantly enriched terms by adjusted p-value, and using at most 10 terms for up-regulated terms and 10 terms for down-regulated terms.")
+    cat("\n\n")
+    figname <- filenames[[1]]
+    cat(paste0("![](", figname, ")\n"))
+    cat("\n")
+  }
+}
+
+```
+
+# MSIGDB HALLMARK Enrichment {.tabset}
+```{r, results='asis'}
+
+filenames <- Sys.glob(file.path(params$enrichdir, '*', "counts.csv"))
+folders <- unique(basename(dirname(filenames)))
+for (folder in str_sort(folders)) {
+  cat("##", strsplit(folder, '_')[[1]][1], strsplit(folder, '_')[[1]][2], "{.tabset}")
+  cat("\n\n")
+  counts <- read.csv(file.path(params$enrichdir, folder, "counts.csv"), row.names=1)
+  cat("The number of genes that passed the adjusted p-value threshold of", gsub("pvaladj", "", strsplit(folder, '_')[[1]][2]), "and log2 fold change threshold of", gsub("log2FC", "", strsplit(folder, '_')[[1]][1]), "to be used for enrichment are:\n\n")
+  cat("Up:", counts[[grep(paste0("X", params$timepoint, "_label.", params$comparison), grep("up", grep('bulk', grep("DESeq2.LRT", colnames(counts), value=TRUE), value=TRUE), value=TRUE), value=TRUE)]], "\n\n")
+  cat("Down:", counts[[grep(paste0("X", params$timepoint, "_label.", params$comparison), grep("down", grep('bulk', grep("DESeq2.LRT", colnames(counts), value=TRUE), value=TRUE), value=TRUE), value=TRUE)]], "\n\n")
+  for (direction in c("Up", "Down")) {
+    filenames <- Sys.glob(file.path(params$enrichdir, '*', paste0(timepoint, '_label-', comparison, '*celltype-bulk_method-DESeq2-LRT*enricher.MSIGDB-HALLMARK*', direction, '*')))
+    if (length(filenames) > 0){
+      cat("###", direction, "regulation {.tabset}")
+      cat("\n\n")
+
+      cat("#### Datatables\n\n")
+      data <- read.csv(grep('csv', grep(folder, filenames, value=TRUE), value=TRUE), row.names=1)
+
+      cat("\n\n")
+      print(htmltools::tagList(DT::datatable(data,
+                                             rownames=F, autoHideNavigation = T,
+                                             options = list(scrollX = TRUE,
+                                                            autowidth = TRUE,
+                                                            pageLength = 10,
+                                                            #dom = 'Bfrtip',
+                                                            buttons = c('copy', 'csv', 'excel'),
+                                                            fixedColumns = list(leftColumns = 1)))))
+      cat("\n")
+
+      if(length(grep('DotPlot.png', grep(folder, filenames, value=TRUE), value=TRUE)) > 0) {
+        cat('#### Dot Plot\n\n')
+        figname <- grep('DotPlot.png', grep(folder, filenames, value=TRUE), value=TRUE)
+        cat(paste0("![](", figname, ")\n"))
+        cat("\n")
+      }
+    }
+  }
+  filenames <- Sys.glob(file.path(params$enrichdir, folder, paste0(timepoint, '_label-', comparison, '*celltype-bulk_method-DESeq2-LRT*enricher.MSIGDB-HALLMARK.BarPlot.png')))
+  if (length(filenames) > 0) {
+    cat("### Bar Plot")
+    cat("\n\n")
+    cat("The bar plot is generated by taking the significantly enriched terms by adjusted p-value, and using at most 10 terms for up-regulated terms and 10 terms for down-regulated terms.")
+    cat("\n\n")
+    figname <- filenames[[1]]
+    cat(paste0("![](", figname, ")\n"))
+    cat("\n")
+  }
+}
+
+```
+
+# KEGG Enrichment {.tabset}
+
+In order to perform KEGG enrichment, the ENSEMBL ID of each gene was mapped to their corresponding ENTREZ ID. These ENTREZ IDs were then used as input to calculate enrichment.
+
+```{r, results='asis'}
+
+filenames <- Sys.glob(file.path(params$enrichdir, '*', "counts.csv"))
+folders <- unique(basename(dirname(filenames)))
+for (folder in str_sort(folders)) {
+  cat("##", strsplit(folder, '_')[[1]][1], strsplit(folder, '_')[[1]][2], "{.tabset}")
+  cat("\n\n")
+#  cat("In order to perform KEGG enrichment, the ENSEMBL ID of each gene was mapped to their corresponding ENTREZ ID. These ENTREZ IDs were then used as input to calculate enrichment.")
+#  cat("\n\n")
+  counts <- read.csv(file.path(params$enrichdir, folder, "counts.csv"), row.names=1)
+  cat("The number of genes that passed the adjusted p-value threshold of", gsub("pvaladj", "", strsplit(folder, '_')[[1]][2]), "and log2 fold change threshold of", gsub("log2FC", "", strsplit(folder, '_')[[1]][1]), "to be used for enrichment are:\n\n")
+  cat("Up:", counts[[grep(paste0("X", params$timepoint, "_label.", params$comparison), grep("up", grep('bulk', grep("DESeq2.LRT", colnames(counts), value=TRUE), value=TRUE), value=TRUE), value=TRUE)]], "\n\n")
+  cat("Down:", counts[[grep(paste0("X", params$timepoint, "_label.", params$comparison), grep("down", grep('bulk', grep("DESeq2.LRT", colnames(counts), value=TRUE), value=TRUE), value=TRUE), value=TRUE)]], "\n\n")
+  for (direction in c("Up", "Down")) {
+    filenames <- Sys.glob(file.path(params$enrichdir, '*', paste0(timepoint, '_label-', comparison, '*celltype-bulk_method-DESeq2-LRT*enrichKEGG*', direction, '*')))
+    if (length(filenames) > 0){
+      cat("###", direction, "regulation {.tabset}")
+      cat("\n\n")
+
+      cat("#### Datatables\n\n")
+      data <- read.csv(grep('csv', grep(folder, filenames, value=TRUE), value=TRUE), row.names=1)
+
+      cat("\n\n")
+      print(htmltools::tagList(DT::datatable(data,
+                                             rownames=F, autoHideNavigation = T,
+                                             options = list(scrollX = TRUE,
+                                                            autowidth = TRUE,
+                                                            pageLength = 10,
+                                                            #dom = 'Bfrtip',
+                                                            buttons = c('copy', 'csv', 'excel'),
+                                                            fixedColumns = list(leftColumns = 1)))))
+      cat("\n")
+
+      if(length(grep('DotPlot.png', grep(folder, filenames, value=TRUE), value=TRUE)) > 0) {
+        cat('#### Dot Plot\n\n')
+        figname <- grep('DotPlot.png', grep(folder, filenames, value=TRUE), value=TRUE)
+        cat(paste0("![](", figname, ")\n"))
+        cat("\n")
+      }
+    }
+  }
+  filenames <- Sys.glob(file.path(params$enrichdir, folder, paste0(timepoint, '_label-', comparison, '*celltype-bulk_method-DESeq2-LRT*enrichKEGG.BarPlot.png')))
+  if (length(filenames) > 0) {
+    cat("### Bar Plot")
+    cat("\n\n")
+    cat("The bar plot is generated by taking the significantly enriched terms by adjusted p-value, and using at most 10 terms for up-regulated terms and 10 terms for down-regulated terms.")
+    cat("\n\n")
+    figname <- filenames[[1]]
+    cat(paste0("![](", figname, ")\n"))
+    cat("\n")
+  }
+}
+
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>

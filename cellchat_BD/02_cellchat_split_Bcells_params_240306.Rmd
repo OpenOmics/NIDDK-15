@@ -1,0 +1,797 @@
+---
+title: "NIDDK-15 CellChat Analysis"
+subtitle: "Trimester `r params$timepoint`: Ligand Receptor Preliminary Report"
+author: "Vicky Chen"
+date: "`r Sys.Date()`"
+output:
+    rmdformats::robobook:
+        lightbox: true
+        number_sections: true
+        code-fold: true
+        toc_depth: 3
+        fig_width: 8
+        fig_height: 8
+params:
+  timepoint: timepoint
+  path: path
+  source: source
+  target: target
+---
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include=TRUE, message=FALSE, warning=FALSE, error=FALSE)
+```
+
+```{r libraries}
+library(CellChat)
+library(Seurat)
+library(patchwork)
+library(ComplexHeatmap)
+library(DT)
+library(knitr)
+library(stringr)
+options(stringsAsFactors = FALSE)
+```
+
+
+```{r, include=FALSE}
+# Init Step to make sure that the dependencies are loaded
+data <- read.csv('/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/seurat_merge/B_cells/Bcells_1Tri_FCRL1_metadata.csv')
+htmltools::tagList(DT::datatable(data, extensions='Buttons', options=list(dom='lBfrtip', buttons = c('copy', 'csv', 'excel'), lengthMenu = list(c(10,25,50,-1), c(10,25,50,"All")))))
+
+```
+
+```{r settings}
+colors = list(`1`='#337AB7', `2`='#6AA84F', `3`='#A70505')
+```
+
+```{r paths}
+seurat_obj <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/analysis1/analysis1_subset.rds"
+# rename B-cells
+b_cells <- read.csv("/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/seurat_merge/B_cells/Bcells_1Tri_FCRL1_metadata.csv", row.names = 1)
+#cellchat_path <- paste0("/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/cellchat_BD/trimester", params$timepoint)
+cellchat_path <- file.path(params$path, paste0('trimester', params$timepoint))
+
+index <- list(after=1, before=2, uninfected=3, without=4)
+comparison <- c(2, 4) # 1 = after, 2 = before, 3 = control, 4 = without 
+```
+
+```{r redefine functions}
+netVisual_bubble <- function (object, sources.use = NULL, targets.use = NULL, signaling = NULL,
+    pairLR.use = NULL, sort.by.source = FALSE, sort.by.target = FALSE,
+    sort.by.source.priority = TRUE, color.heatmap = c("Spectral",
+        "viridis"), n.colors = 10, direction = -1, thresh = 0.05,
+    comparison = NULL, group = NULL, remove.isolate = FALSE,
+    max.dataset = NULL, min.dataset = NULL, min.quantile = 0,
+    max.quantile = 1, line.on = TRUE, line.size = 0.2, color.text.use = TRUE,
+    color.text = NULL, dot.size.min = NULL, dot.size.max = NULL,
+    title.name = NULL, font.size = 10, font.size.title = 10,
+    show.legend = TRUE, grid.on = TRUE, color.grid = "grey90",
+    angle.x = 90, vjust.x = NULL, hjust.x = NULL, return.data = FALSE)
+{
+    color.heatmap <- match.arg(color.heatmap)
+    if (is.list(object@net[[1]])) {
+        message("Comparing communications on a merged object \n")
+    }
+    else {
+        message("Comparing communications on a single object \n")
+    }
+    if (is.null(vjust.x) | is.null(hjust.x)) {
+        angle = c(0, 45, 90)
+        hjust = c(0, 1, 1)
+        vjust = c(0, 1, 0.5)
+        vjust.x = vjust[angle == angle.x]
+        hjust.x = hjust[angle == angle.x]
+    }
+    if (length(color.heatmap) == 1) {
+        color.use <- tryCatch({
+            RColorBrewer::brewer.pal(n = n.colors, name = color.heatmap)
+        }, error = function(e) {
+            (scales::viridis_pal(option = color.heatmap, direction = -1))(n.colors)
+        })
+    }
+    else {
+        color.use <- color.heatmap
+    }
+    if (direction == -1) {
+        color.use <- rev(color.use)
+    }
+    if (!is.null(pairLR.use)) {
+        if (!is.data.frame(pairLR.use)) {
+            stop("pairLR.use should be a data frame with a signle column named either 'interaction_name' or 'pathway_name' ")
+        }
+        else if ("pathway_name" %in% colnames(pairLR.use)) {
+            pairLR.use$pathway_name <- as.character(pairLR.use$pathway_name)
+        }
+        else if ("interaction_name" %in% colnames(pairLR.use)) {
+            pairLR.use$interaction_name <- as.character(pairLR.use$interaction_name)
+        }
+    }
+    if (is.null(comparison)) {
+        cells.level <- levels(object@idents)
+        if (is.numeric(sources.use)) {
+            sources.use <- cells.level[sources.use]
+        }
+        if (is.numeric(targets.use)) {
+            targets.use <- cells.level[targets.use]
+        }
+        df.net <- subsetCommunication(object, slot.name = "net",
+            sources.use = sources.use, targets.use = targets.use,
+            signaling = signaling, pairLR.use = pairLR.use, thresh = thresh)
+        df.net$source.target <- paste(df.net$source, df.net$target,
+            sep = " -> ")
+        source.target <- paste(rep(sources.use, each = length(targets.use)),
+            targets.use, sep = " -> ")
+        source.target.isolate <- setdiff(source.target, unique(df.net$source.target))
+        if (length(source.target.isolate) > 0) {
+            df.net.isolate <- as.data.frame(matrix(NA, nrow = length(source.target.isolate),
+                ncol = ncol(df.net)))
+            colnames(df.net.isolate) <- colnames(df.net)
+            df.net.isolate$source.target <- source.target.isolate
+            df.net.isolate$interaction_name_2 <- df.net$interaction_name_2[1]
+            df.net.isolate$pval <- 1
+            a <- stringr::str_split(df.net.isolate$source.target,
+                " -> ", simplify = T)
+            df.net.isolate$source <- as.character(a[, 1])
+            df.net.isolate$target <- as.character(a[, 2])
+            df.net <- rbind(df.net, df.net.isolate)
+        }
+        df.net$pval[df.net$pval > 0.05] = 1
+        df.net$pval[df.net$pval > 0.01 & df.net$pval <= 0.05] = 2
+        df.net$pval[df.net$pval <= 0.01] = 3
+        df.net$prob[df.net$prob == 0] <- NA
+        df.net$prob.original <- df.net$prob
+        df.net$prob <- -1/log(df.net$prob)
+        idx1 <- which(is.infinite(df.net$prob) | df.net$prob <
+            0)
+        if (sum(idx1) > 0) {
+            values.assign <- seq(max(df.net$prob, na.rm = T) *
+                1.1, max(df.net$prob, na.rm = T) * 1.5, length.out = length(idx1))
+            position <- sort(prob.original[idx1], index.return = TRUE)$ix
+            df.net$prob[idx1] <- values.assign[match(1:length(idx1),
+                position)]
+        }
+        df.net$source <- factor(df.net$source, levels = cells.level[cells.level %in%
+            unique(df.net$source)])
+        df.net$target <- factor(df.net$target, levels = cells.level[cells.level %in%
+            unique(df.net$target)])
+        group.names <- paste(rep(levels(df.net$source), each = length(levels(df.net$target))),
+            levels(df.net$target), sep = " -> ")
+        df.net$interaction_name_2 <- as.character(df.net$interaction_name_2)
+        df.net <- with(df.net, df.net[order(interaction_name_2),
+            ])
+        df.net$interaction_name_2 <- factor(df.net$interaction_name_2,
+            levels = unique(df.net$interaction_name_2))
+        cells.order <- group.names
+        df.net$source.target <- factor(df.net$source.target,
+            levels = cells.order)
+        df <- df.net
+    }
+    else {
+        dataset.name <- names(object@net)
+        df.net.all <- subsetCommunication(object, slot.name = "net",
+            sources.use = sources.use, targets.use = targets.use,
+            signaling = signaling, pairLR.use = pairLR.use, thresh = thresh)
+        df.all <- data.frame()
+        for (ii in 1:length(comparison)) {
+            cells.level <- levels(object@idents[[comparison[ii]]])
+            if (is.numeric(sources.use)) {
+                sources.use <- cells.level[sources.use]
+            }
+            if (is.numeric(targets.use)) {
+                targets.use <- cells.level[targets.use]
+            }
+            df.net <- df.net.all[[comparison[ii]]]
+            df.net$interaction_name_2 <- as.character(df.net$interaction_name_2)
+            df.net$source.target <- paste(df.net$source, df.net$target,
+                sep = " -> ")
+            source.target <- paste(rep(sources.use, each = length(targets.use)),
+                targets.use, sep = " -> ")
+            source.target.isolate <- setdiff(source.target, unique(df.net$source.target))
+            if (length(source.target.isolate) > 0) {
+                df.net.isolate <- as.data.frame(matrix(NA, nrow = length(source.target.isolate),
+                  ncol = ncol(df.net)))
+                colnames(df.net.isolate) <- colnames(df.net)
+                df.net.isolate$source.target <- source.target.isolate
+                df.net.isolate$interaction_name_2 <- df.net$interaction_name_2[1]
+                df.net.isolate$pval <- 1
+                a <- stringr::str_split(df.net.isolate$source.target,
+                  " -> ", simplify = T)
+                df.net.isolate$source <- as.character(a[, 1])
+                df.net.isolate$target <- as.character(a[, 2])
+                df.net <- rbind(df.net, df.net.isolate)
+            }
+            df.net$source <- factor(df.net$source, levels = cells.level[cells.level %in%
+                unique(df.net$source)])
+            df.net$target <- factor(df.net$target, levels = cells.level[cells.level %in%
+                unique(df.net$target)])
+            group.names <- paste(rep(levels(df.net$source), each = length(levels(df.net$target))),
+                levels(df.net$target), sep = " -> ")
+            group.names0 <- group.names
+            group.names <- paste0(group.names0, " (", dataset.name[comparison[ii]],
+                ")")
+            if (nrow(df.net) > 0) {
+                df.net$pval[df.net$pval > 0.05] = 1
+                df.net$pval[df.net$pval > 0.01 & df.net$pval <=
+                  0.05] = 2
+                df.net$pval[df.net$pval <= 0.01] = 3
+                df.net$prob[df.net$prob == 0] <- NA
+                df.net$prob.original <- df.net$prob
+                df.net$prob <- -1/log(df.net$prob)
+            }
+            else {
+                df.net <- as.data.frame(matrix(NA, nrow = length(group.names),
+                  ncol = 5))
+                colnames(df.net) <- c("interaction_name_2", "source.target",
+                  "prob", "pval", "prob.original")
+                df.net$source.target <- group.names0
+            }
+            df.net$group.names <- as.character(df.net$source.target)
+            df.net$source.target <- paste0(df.net$source.target,
+                " (", dataset.name[comparison[ii]], ")")
+            df.net$dataset <- dataset.name[comparison[ii]]
+            df.all <- rbind(df.all, df.net)
+        }
+        if (nrow(df.all) == 0) {
+            stop("No interactions are detected. Please consider changing the cell groups for analysis. ")
+        }
+        idx1 <- which(is.infinite(df.all$prob) | df.all$prob <
+            0)
+        if (sum(idx1) > 0) {
+            values.assign <- seq(max(df.all$prob, na.rm = T) *
+                1.1, max(df.all$prob, na.rm = T) * 1.5, length.out = length(idx1))
+            position <- sort(df.all$prob.original[idx1], index.return = TRUE)$ix
+            df.all$prob[idx1] <- values.assign[match(1:length(idx1),
+                position)]
+        }
+        df.all$interaction_name_2[is.na(df.all$interaction_name_2)] <- df.all$interaction_name_2[!is.na(df.all$interaction_name_2)][1]
+        df <- df.all
+        df <- with(df, df[order(interaction_name_2), ])
+        df$interaction_name_2 <- factor(df$interaction_name_2,
+            levels = unique(df$interaction_name_2))
+        cells.order <- c()
+        dataset.name.order <- c()
+        for (i in 1:length(group.names0)) {
+            for (j in 1:length(comparison)) {
+                cells.order <- c(cells.order, paste0(group.names0[i],
+                  " (", dataset.name[comparison[j]], ")"))
+                dataset.name.order <- c(dataset.name.order, dataset.name[comparison[j]])
+            }
+        }
+        df$source.target <- factor(df$source.target, levels = cells.order)
+    }
+    min.cutoff <- quantile(df$prob, min.quantile, na.rm = T)
+    max.cutoff <- quantile(df$prob, max.quantile, na.rm = T)
+    df$prob[df$prob < min.cutoff] <- min.cutoff
+    df$prob[df$prob > max.cutoff] <- max.cutoff
+    if (remove.isolate) {
+        df <- df[!is.na(df$prob), ]
+        line.on <- FALSE
+    }
+    if (!is.null(max.dataset)) {
+        signaling <- as.character(unique(df$interaction_name_2))
+        for (i in signaling) {
+            df.i <- df[df$interaction_name_2 == i, , drop = FALSE]
+            cell <- as.character(unique(df.i$group.names))
+            for (j in cell) {
+                df.i.j <- df.i[df.i$group.names == j, , drop = FALSE]
+                values <- df.i.j$prob
+                idx.max <- which(values == max(values, na.rm = T))
+                idx.min <- which(values == min(values, na.rm = T))
+                dataset.na <- c(df.i.j$dataset[is.na(values)],
+                  setdiff(dataset.name[comparison], df.i.j$dataset))
+                if (length(idx.max) > 0) {
+                  if (!(unique(df.i.j$dataset[idx.max]) %in% dataset.name[max.dataset])) {
+                    df.i.j$prob <- NA
+                  }
+                  else if ((unique(idx.max != idx.min)) & !is.null(min.dataset)) {
+                    if (!(df.i.j$dataset[idx.min] %in% dataset.name[min.dataset])) {
+                      df.i.j$prob <- NA
+                    }
+                    else if (length(dataset.na) > 0 & sum(!(dataset.name[min.dataset] %in%
+                      dataset.na)) > 0) {
+                      df.i.j$prob <- NA
+                    }
+                  }
+                }
+                df.i[df.i$group.names == j, "prob"] <- df.i.j$prob
+            }
+            df[df$interaction_name_2 == i, "prob"] <- df.i$prob
+        }
+    }
+    if (remove.isolate) {
+        df <- df[!is.na(df$prob), ]
+        line.on <- FALSE
+    }
+    if (nrow(df) == 0) {
+        stop("No interactions are detected. Please consider changing the cell groups for analysis. ")
+    }
+    if (!is.null(pairLR.use)) {
+        interaction_name_2.order <- intersect(object@DB$interaction[pairLR.use$interaction_name,
+            ]$interaction_name_2, unique(df$interaction_name_2))
+        df$interaction_name_2 <- factor(df$interaction_name_2,
+            levels = interaction_name_2.order)
+    }
+    df$source.target = droplevels(df$source.target, exclude = setdiff(levels(df$source.target),
+        unique(df$source.target)))
+    if (sort.by.target & !sort.by.source) {
+        if (!is.null(targets.use)) {
+            df$target <- factor(df$target, levels = intersect(targets.use,
+                df$target))
+            df <- with(df, df[order(target, source), ])
+            source.target.order <- unique(as.character(df$source.target))
+            df$source.target <- factor(df$source.target, levels = source.target.order)
+        }
+    }
+    if (sort.by.source & !sort.by.target) {
+        if (!is.null(sources.use)) {
+            df$source <- factor(df$source, levels = intersect(sources.use,
+                df$source))
+            df <- with(df, df[order(source, target), ])
+            source.target.order <- unique(as.character(df$source.target))
+            df$source.target <- factor(df$source.target, levels = source.target.order)
+        }
+    }
+    if (sort.by.source & sort.by.target) {
+        if (!is.null(sources.use)) {
+            df$source <- factor(df$source, levels = intersect(sources.use,
+                df$source))
+            if (!is.null(targets.use)) {
+                df$target <- factor(df$target, levels = intersect(targets.use,
+                  df$target))
+            }
+            if (sort.by.source.priority) {
+                df <- with(df, df[order(source, target), ])
+            }
+            else {
+                df <- with(df, df[order(target, source), ])
+            }
+            source.target.order <- unique(as.character(df$source.target))
+            df$source.target <- factor(df$source.target, levels = source.target.order)
+        }
+    }
+    g <- ggplot(df, aes(x = source.target, y = interaction_name_2,
+        color = prob, size = pval)) + geom_point(pch = 16) +
+        theme_linedraw() + theme(panel.grid.major = element_blank()) +
+        theme(axis.text.x = element_text(angle = angle.x, hjust = hjust.x,
+            vjust = vjust.x), axis.title.x = element_blank(),
+            axis.title.y = element_blank()) + scale_x_discrete(position = "bottom")
+    values <- c(1, 2, 3)
+    names(values) <- c("p > 0.05", "0.01 < p < 0.05", "p < 0.01")
+    if (is.null(dot.size.max)) {
+        dot.size.max = max(df$pval)
+    }
+    if (is.null(dot.size.min)) {
+        dot.size.min = min(df$pval)
+    }
+    g <- g + scale_radius(range = c(dot.size.min, dot.size.max),
+        breaks = sort(unique(df$pval)), labels = names(values)[values %in%
+            sort(unique(df$pval))], name = "p-value")
+    if (min(df$prob, na.rm = T) != max(df$prob, na.rm = T)) {
+        g <- g + scale_colour_gradientn(colors = colorRampPalette(color.use)(99),
+            na.value = "white", limits = c(quantile(df$prob,
+                0, na.rm = T), quantile(df$prob, 1, na.rm = T)),
+            breaks = c(quantile(df$prob, 0, na.rm = T), quantile(df$prob,
+                1, na.rm = T)), labels = c("min", "max")) + guides(color = guide_colourbar(barwidth = 0.5,
+            title = "Commun. Prob."))
+    }
+    else {
+        g <- g + scale_colour_gradientn(colors = colorRampPalette(color.use)(99),
+            na.value = "white") + guides(color = guide_colourbar(barwidth = 0.5,
+            title = "Commun. Prob."))
+    }
+    g <- g + theme(text = element_text(size = font.size), plot.title = element_text(size = font.size.title)) +
+        theme(legend.title = element_text(size = 8), legend.text = element_text(size = 6))
+    if (grid.on) {
+        if (length(unique(df$source.target)) > 1) {
+            g <- g + geom_vline(xintercept = seq(1.5, length(unique(df$source.target)) -
+                0.5, 1), lwd = 0.1, colour = color.grid)
+        }
+        if (length(unique(df$interaction_name_2)) > 1) {
+            g <- g + geom_hline(yintercept = seq(1.5, length(unique(df$interaction_name_2)) -
+                0.5, 1), lwd = 0.1, colour = color.grid)
+        }
+    }
+    if (!is.null(title.name)) {
+        g <- g + ggtitle(title.name) + theme(plot.title = element_text(hjust = 0.5))
+    }
+    if (!is.null(comparison)) {
+        if (line.on) {
+            xintercept = seq(0.5 + length(dataset.name[comparison]),
+                length(group.names0) * length(dataset.name[comparison]),
+                by = length(dataset.name[comparison]))
+            g <- g + geom_vline(xintercept = xintercept, linetype = "dashed",
+                color = "grey60", size = line.size)
+        }
+        if (color.text.use) {
+            if (is.null(group)) {
+                group <- 1:length(comparison)
+                names(group) <- dataset.name[comparison]
+            }
+            if (is.null(color.text)) {
+                color <- ggPalette(length(unique(group)))
+            }
+            else {
+                color <- color.text
+            }
+            names(color) <- names(group[!duplicated(group)])
+            color <- color[group]
+            dataset.name.order <- levels(df$source.target)
+            dataset.name.order <- stringr::str_match(dataset.name.order,
+                "\\(.*\\)")
+            dataset.name.order <- stringr::str_sub(dataset.name.order,
+                2, stringr::str_length(dataset.name.order) -
+                  1)
+            xtick.color <- color[dataset.name.order]
+            g <- g + theme(axis.text.x = element_text(colour = xtick.color))
+        }
+    }
+    if (!show.legend) {
+        g <- g + theme(legend.position = "none")
+    }
+    if (return.data) {
+        return(list(communication = df, gg.obj = g))
+    }
+    else {
+        return(g)
+    }
+}
+
+netVisual_heatmap_edit <- function (object, comparison = c(1, 2), measure = c("count",
+                                                                              "weight"), signaling = NULL, slot.name = c("netP", "net"),
+                                    color.use = NULL, color.heatmap = c("#2166ac", "#b2182b"),
+                                    title.name = NULL, width = NULL, height = NULL, font.size = 8,
+                                    font.size.title = 10, cluster.rows = FALSE, cluster.cols = FALSE,
+                                    sources.use = NULL, targets.use = NULL, remove.isolate = FALSE,
+                                    row.show = NULL, col.show = NULL, maximum=NULL)
+{
+  if (!is.null(measure)) {
+    measure <- match.arg(measure)
+  }
+  slot.name <- match.arg(slot.name)
+  if (is.list(object@net[[1]])) {
+    message("Do heatmap based on a merged object \n")
+    obj1 <- object@net[[comparison[1]]][[measure]]
+    obj2 <- object@net[[comparison[2]]][[measure]]
+    net.diff <- obj2 - obj1
+    if (measure == "count") {
+      if (is.null(title.name)) {
+        title.name = "Differential number of interactions"
+      }
+    }
+    else if (measure == "weight") {
+      if (is.null(title.name)) {
+        title.name = "Differential interaction strength"
+      }
+    }
+    legend.name = "Relative values"
+  }
+  else {
+    message("Do heatmap based on a single object \n")
+    if (!is.null(signaling)) {
+      net.diff <- slot(object, slot.name)$prob[, , signaling]
+      if (is.null(title.name)) {
+        title.name = paste0(signaling, " signaling network")
+      }
+      legend.name <- "Communication Prob."
+    }
+    else if (!is.null(measure)) {
+      net.diff <- object@net[[measure]]
+      if (measure == "count") {
+        if (is.null(title.name)) {
+          title.name = "Number of interactions"
+        }
+      }
+      else if (measure == "weight") {
+        if (is.null(title.name)) {
+          title.name = "Interaction strength"
+        }
+      }
+      legend.name <- title.name
+    }
+  }
+  net <- net.diff
+  if ((!is.null(sources.use)) | (!is.null(targets.use))) {
+    df.net <- reshape2::melt(net, value.name = "value")
+    colnames(df.net)[1:2] <- c("source", "target")
+    if (!is.null(sources.use)) {
+      if (is.numeric(sources.use)) {
+        sources.use <- rownames(net.diff)[sources.use]
+      }
+      df.net <- subset(df.net, source %in% sources.use)
+    }
+    if (!is.null(targets.use)) {
+      if (is.numeric(targets.use)) {
+        targets.use <- rownames(net.diff)[targets.use]
+      }
+      df.net <- subset(df.net, target %in% targets.use)
+    }
+    cells.level <- rownames(net.diff)
+    df.net$source <- factor(df.net$source, levels = cells.level)
+    df.net$target <- factor(df.net$target, levels = cells.level)
+    df.net$value[is.na(df.net$value)] <- 0
+    net <- tapply(df.net[["value"]], list(df.net[["source"]],
+                                          df.net[["target"]]), sum)
+  }
+  net[is.na(net)] <- 0
+  if (remove.isolate) {
+    idx1 <- which(Matrix::rowSums(net) == 0)
+    idx2 <- which(Matrix::colSums(net) == 0)
+    idx <- intersect(idx1, idx2)
+    if (length(idx) > 0) {
+      net <- net[-idx, ]
+      net <- net[, -idx]
+    }
+  }
+  mat <- net
+  if (is.null(color.use)) {
+    color.use <- scPalette(ncol(mat))
+  }
+  names(color.use) <- colnames(mat)
+  if (!is.null(row.show)) {
+    mat <- mat[row.show, ]
+  }
+  if (!is.null(col.show)) {
+    mat <- mat[, col.show]
+    color.use <- color.use[col.show]
+  }
+  if (min(mat) < 0) {
+    color.heatmap.use = colorRamp3(c(min(mat), 0, max(mat)),
+                                   c(color.heatmap[1], "#f7f7f7", color.heatmap[2]))
+    colorbar.break <- c(round(min(mat, na.rm = T), digits = nchar(sub(".*\\.(0*).*",
+                                                                      "\\1", min(mat, na.rm = T))) + 1), 0, round(max(mat,
+                                                                                                                      na.rm = T), digits = nchar(sub(".*\\.(0*).*", "\\1",
+                                                                                                                                                     max(mat, na.rm = T))) + 1))
+  }
+  else {
+    if (length(color.heatmap) == 3) {
+      color.heatmap.use = colorRamp3(c(0, min(mat), max(mat)),
+                                     color.heatmap)
+    }
+    else if (length(color.heatmap) == 2) {
+      color.heatmap.use = colorRamp3(c(min(mat), max(mat)),
+                                     color.heatmap)
+    }
+    else if (length(color.heatmap) == 1) {
+      color.heatmap.use = (grDevices::colorRampPalette((RColorBrewer::brewer.pal(n = 9,
+                                                                                 name = color.heatmap))))(100)
+    }
+    colorbar.break <- c(round(min(mat, na.rm = T), digits = nchar(sub(".*\\.(0*).*",
+                                                                      "\\1", min(mat, na.rm = T))) + 1), round(max(mat,
+                                                                                                                   na.rm = T), digits = nchar(sub(".*\\.(0*).*", "\\1",
+                                                                                                                                                  max(mat, na.rm = T))) + 1))
+  }
+  df <- data.frame(group = colnames(mat))
+  rownames(df) <- colnames(mat)
+  col_annotation <- HeatmapAnnotation(df = df, col = list(group = color.use),
+                                      which = "column", show_legend = FALSE, show_annotation_name = FALSE,
+                                      simple_anno_size = grid::unit(0.2, "cm"))
+  row_annotation <- HeatmapAnnotation(df = df, col = list(group = color.use),
+                                      which = "row", show_legend = FALSE, show_annotation_name = FALSE,
+                                      simple_anno_size = grid::unit(0.2, "cm"))
+  ha1 = rowAnnotation(Strength = anno_barplot(rowSums(abs(mat)),
+                                              border = FALSE, gp = gpar(fill = color.use, col = color.use)),
+                      show_annotation_name = FALSE)
+  ha2 = HeatmapAnnotation(Strength = anno_barplot(colSums(abs(mat)),
+                                                  border = FALSE, gp = gpar(fill = color.use, col = color.use)),
+                          show_annotation_name = FALSE)
+  if (sum(abs(mat) > 0) == 1) {
+    color.heatmap.use = c("white", color.heatmap.use)
+  }
+  else {
+    mat[mat == 0] <- NA
+  }
+  ht1 = Heatmap(mat, col = circlize::colorRamp2(0:8 / (8/maximum), c("#FFF5F0", "#FEE0D2", "#FCBBA1", "#FC9272", "#FB6A4A", "#EF3B2C", "#CB181D", "#A50F15", "#67000D")), na_col = "white",
+                name = legend.name, bottom_annotation = col_annotation,
+                left_annotation = row_annotation, top_annotation = ha2,
+                right_annotation = ha1, cluster_rows = cluster.rows,
+                cluster_columns = cluster.rows, row_names_side = "left",
+                row_names_rot = 0, row_names_gp = gpar(fontsize = font.size),
+                column_names_gp = gpar(fontsize = font.size), column_title = title.name,
+                column_title_gp = gpar(fontsize = font.size.title), column_names_rot = 90,
+                row_title = "Sources (Sender)", row_title_gp = gpar(fontsize = font.size.title),
+                row_title_rot = 90, heatmap_legend_param = list(title_gp = gpar(fontsize = 8,
+                                                                                fontface = "plain"), title_position = "leftcenter-rot",
+                                                                border = NA, legend_height = unit(20, "mm"), labels_gp = gpar(fontsize = 8),
+                                                                grid_width = unit(2, "mm")))
+  return(ht1)
+}
+```
+
+
+# CellChat: All Groups
+[CellChat^1^](http://www.cellchat.org/) v2.1.1 is an R package that is able to infer cell-cell communication using single-cell RNA-seq data.  The gene expression is compared to a CellChat curated database of known ligand, receptor, and cofactor interactions.  The CellChat v2 database contains ~3,300 validated molecular interactions.  
+
+CellChat processing starts by identifying over expressed genes and interactions and projecting that information onto a Protein-Protein Interaction network (PPI).  Biologically significant cell-cell communication interactions are assigned a probability value by modeling gene expression normalized using a method called trimean with prior knowledge of interactions using the law of mass action.  Once probability has been calculated permutation testing is performed.  Cell-cell communications were filtered out if there were fewer than 10 cells in the comparison.  The parameter `population.size = TRUE` was used for this calculation meaning that CellChat took into account that this data is a population of cells as opposed to a subset of cell-sorted cells.
+
+CellChat analysis was performed on <font color=`r colors[params$timepoint]`> **trimester `r params$timepoint`**</font> HBV-infected subjects that experienced a flare **before** birth, **after** birth, HBV-infected subjects **without** a flare, and **uninfected** subjects.  
+
+
+```{r create cellchat object}
+# CellChat object created via another script "01_installCellChat_split_Bcells.R"
+# Combine all 4 objects to increase power https://github.com/jinworks/CellChat/issues/62
+cellchat.control <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_control_cellchat.rds"))))
+cellchat.before <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_before_cellchat.rds"))))
+cellchat.after <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_after_cellchat.rds"))))
+cellchat.without <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_without_cellchat.rds"))))
+
+object.list <- list(after = cellchat.after, before = cellchat.before, uninfected = cellchat.control, without = cellchat.without)
+
+cellchat <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_all_cellchat.rds"))))
+```
+
+## Highest Contributing Signals {.tabset .tabset-fade}
+Using the predicted communication between different cell groups in the sample, it is possible to visualize which networks are the largest contributors to any incoming or outgoing signals of each cell group. Plots for all four groups are being showed side by side for a direct comparison of the relative strengths.
+
+```{r Contributing Signals, results='asis',  fig.width=12,  fig.height=9}
+pathway.union <- c()
+
+for (i in object.list) {pathway.union <- union(pathway.union, i@netP$pathways)}
+
+ht_list <- sapply(names(object.list), function(x) netAnalysis_signalingRole_heatmap(object.list[[x]], pattern="outgoing", width=5, height=(length(pathway.union) /4)+1, title=x, signaling=pathway.union))
+
+draw(ht_list$after + ht_list$before + ht_list$uninfected + ht_list$without, ht_gap = unit(0.5, "cm"))
+
+```
+
+
+# CellChat: `r params$source` to `r params$target`
+
+## Significant Interaction Pairs {.tabset .tabset-fade}
+
+The significant interactions with `r params$source` as a source and `r params$target` as a target was compared between the without group and each of the other flare groups to determine which communications networks have increased signaling in each group.
+
+```{r Comparing communications, results='asis'}
+source = which(cellchat.after@idents %>% levels == params$source)
+target = which(cellchat.after@idents %>% levels == params$target)
+
+for (i in setdiff(names(index), 'without') ) {
+  x <- index[[i]]
+
+  cat("### ", str_to_title(i), "{-}\n\n")
+  
+  gg1 <- tryCatch({netVisual_bubble(cellchat, sources.use = source, targets.use = target,  comparison = c(x, 4), max.dataset = 4, title.name = "Increased signaling in Without", angle.x = 45, remove.isolate = T)}, error=function(cond) {NULL})
+  
+  gg2 <- tryCatch({netVisual_bubble(cellchat, sources.use = source, targets.use = target,  comparison = c(x, 4), max.dataset = x, title.name = "Decreased signaling in Without", angle.x = 45, remove.isolate = T)}, error=function(cond) {NULL})
+  
+  print(gg1 + gg2)
+  cat("\n\n")
+  
+}
+
+```
+
+## Significant signaling pathways  
+
+### Chord Plots {.tabset .tabset-fade -}
+The following chord plots are used to visualize all the significant signaling pathways from `r params$source` to `r params$target`. The color of the circles denotes the associated cell type. The thinner inner circle marks where the signal is targetting. Each segment of the circle represents a signaling pathway.
+
+```{r chord gene, results='asis'}
+plotChordGene <- function(group, cellchat) {
+  cat("\n\n")
+  cat("####", group, "{-}\n\n")
+  print(netVisual_chord_gene(cellchat, sources.use=source, targets.use=target, slot.name="netP", lab.cex = 0.5, title.name = paste0("Signaling from ", params$source, " to ", params$target, " - ", group)))
+  cat("\n\n")
+}
+
+plotChordGene("After", cellchat.after)
+plotChordGene("Before", cellchat.before)
+plotChordGene("Uninfected", cellchat.control)
+plotChordGene("Without", cellchat.without)
+```
+
+### Heatmaps {.tabset .tabset-fade -}
+
+Heatmaps for each significant signaling pathway were generated to show the different communication probability for each flare group. If the pathway is not detected in a specific flare group then no heatmap would be generated for that group.
+
+```{r pathways prep}
+communication <- do.call(rbind, lapply(names(object.list), function(x) cbind(subsetCommunication(object.list[[x]]), group=x)))
+pathways.show <- communication %>% filter(source == params$source & target == params$target) %>% pull(pathway_name) %>% unique %>% sort
+```
+
+```{r pathways, results='asis', fig.width=9}
+for (pathway in pathways.show) {
+  maximum <- max(sapply(object.list, function(x) {
+    tryCatch({
+      test <-netVisual_heatmap(x, signaling = pathway)
+      max(test@matrix, na.rm = T)
+    }, 
+    error=function(cond) {
+      0
+    })
+  }))
+  
+  cat("####", pathway, "{-}\n\n")
+  
+  figures <- sapply(names(object.list), function(x) tryCatch({
+    netVisual_heatmap_edit(
+      object.list[[x]],
+      signaling = pathway,
+      title.name = paste(pathway, "signaling\n", x %>% str_to_title()),
+      maximum = maximum
+    )
+  }, error = function(cond) {
+    
+  }
+  ))
+  
+  if ((!sapply(figures, is.null)) %>% sum == 1 ){
+    print(figures[[which(!(sapply(figures, is.null)))]])
+  }else {
+    
+    print(tryCatch({
+      netVisual_heatmap_edit(
+        object.list[['after']],
+        signaling = pathway,
+        title.name = paste(pathway, "signaling\n", 'After'),
+        maximum = maximum
+      )
+    }, error = function(cond) {
+      
+    })
+    + tryCatch({
+      netVisual_heatmap_edit(
+        object.list[['before']],
+        signaling = pathway,
+        title.name = paste(pathway, "signaling\n", 'Before'),
+        maximum = maximum
+      )
+    }, error = function(cond) {
+      
+    }) + tryCatch({
+      netVisual_heatmap_edit(
+        object.list[['uninfected']],
+        signaling = pathway,
+        title.name = paste(pathway, "signaling\n", 'Uninfected'),
+        maximum = maximum
+      )
+    }, error = function(cond) {
+      
+    })
+    + tryCatch({
+      netVisual_heatmap_edit(
+        object.list[['without']],
+        signaling = pathway,
+        title.name = paste(pathway, "signaling\n", 'Without'),
+        maximum = maximum
+      )
+    }, error = function(cond) {
+      
+    }))
+    
+  }
+  
+  cat("\n\n")
+  
+}
+```
+
+### Tables {.tabset .tabset-fade -}
+ 
+The significant signaling pathways from `r params$source` to `r params$target` for each group. The tables below are returning interactions that have a p-value less than 0.05.
+
+```{r communication table, results='asis'}
+getCommnication <- function(group, cellchat) {
+  df.net <- subsetCommunication(cellchat, sources.use=params$source, targets.use=params$target)
+  df.net$prob <- round(df.net$prob, digits=4)
+  cat("\n\n")
+  cat("#### ", group, "{-}\n\n")
+  print(htmltools::tagList(DT::datatable(df.net, extensions='Buttons', rownames=FALSE, options=list(order = list(list(5, 'asc'), list(4, 'desc')), dom='lBfrtip', buttons = c('copy', 'csv', 'excel'), lengthMenu = list(c(10,25,50,-1), c(10,25,50,"All"))))))
+}
+
+getCommnication("After", cellchat.after)
+getCommnication("Before", cellchat.before)
+getCommnication("Uninfected", cellchat.control)
+getCommnication("Without", cellchat.without)
+```
+
+# Session Info
+```{r Session Info, attr.output='style="max-height: 500px;"'}
+#sessionInfo()
+devtools::session_info()
+```
+
+# References
+###### 1. Suoqin Jin et al., Inference and analysis of cell-cell communication using CellChat. Nature Communications, 12:1088 (2021). https://www.nature.com/articles/s41467-021-21246-9 {-}
+
+

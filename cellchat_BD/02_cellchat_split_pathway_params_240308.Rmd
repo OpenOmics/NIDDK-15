@@ -1,0 +1,405 @@
+---
+title: "NIDDK-15 CellChat Analysis"
+subtitle: "Trimester `r params$timepoint`: `r params$pathway` Signaling Pathway Report"
+author: "Vicky Chen"
+date: "`r Sys.Date()`"
+output:
+    rmdformats::robobook:
+        lightbox: true
+        number_sections: true
+        code-fold: true
+        toc_depth: 3
+        fig_width: 8
+        fig_height: 8
+params:
+  timepoint: timepoint
+  path: path
+  source: source
+  target: target
+  pathway: pathway
+---
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include=TRUE, message=FALSE, warning=FALSE, error=FALSE)
+```
+
+```{r libraries}
+library(CellChat)
+library(Seurat)
+library(patchwork)
+library(ComplexHeatmap)
+library(DT)
+library(knitr)
+library(stringr)
+options(stringsAsFactors = FALSE)
+```
+
+
+```{r, include=FALSE}
+# Init Step to make sure that the dependencies are loaded
+data <- read.csv('/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/seurat_merge/B_cells/Bcells_1Tri_FCRL1_metadata.csv')
+htmltools::tagList(DT::datatable(data, extensions='Buttons', options=list(dom='lBfrtip', buttons = c('copy', 'csv', 'excel'), lengthMenu = list(c(10,25,50,-1), c(10,25,50,"All")))))
+
+```
+
+```{r settings}
+colors = list(`1`='#337AB7', `2`='#6AA84F', `3`='#A70505')
+```
+
+```{r paths}
+seurat_obj <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/analysis1/analysis1_subset.rds"
+# rename B-cells
+b_cells <- read.csv("/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/seurat_merge/B_cells/Bcells_1Tri_FCRL1_metadata.csv", row.names = 1)
+#cellchat_path <- paste0("/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/cellchat_BD/trimester", params$timepoint)
+cellchat_path <- file.path(params$path, paste0('trimester', params$timepoint))
+
+index <- list(after=1, before=2, uninfected=3, without=4)
+comparison <- c(2, 4) # 1 = after, 2 = before, 3 = control, 4 = without 
+```
+
+```{r redefine functions}
+netVisual_heatmap_edit <- function (object, comparison = c(1, 2), measure = c("count",
+                                                                              "weight"), signaling = NULL, slot.name = c("netP", "net"),
+                                    color.use = NULL, color.heatmap = c("#2166ac", "#b2182b"),
+                                    title.name = NULL, width = NULL, height = NULL, font.size = 8,
+                                    font.size.title = 10, cluster.rows = FALSE, cluster.cols = FALSE,
+                                    sources.use = NULL, targets.use = NULL, remove.isolate = FALSE,
+                                    row.show = NULL, col.show = NULL, maximum=NULL)
+{
+  if (!is.null(measure)) {
+    measure <- match.arg(measure)
+  }
+  slot.name <- match.arg(slot.name)
+  if (is.list(object@net[[1]])) {
+    message("Do heatmap based on a merged object \n")
+    obj1 <- object@net[[comparison[1]]][[measure]]
+    obj2 <- object@net[[comparison[2]]][[measure]]
+    net.diff <- obj2 - obj1
+    if (measure == "count") {
+      if (is.null(title.name)) {
+        title.name = "Differential number of interactions"
+      }
+    }
+    else if (measure == "weight") {
+      if (is.null(title.name)) {
+        title.name = "Differential interaction strength"
+      }
+    }
+    legend.name = "Relative values"
+  }
+  else {
+    message("Do heatmap based on a single object \n")
+    if (!is.null(signaling)) {
+      net.diff <- slot(object, slot.name)$prob[, , signaling]
+      if (is.null(title.name)) {
+        title.name = paste0(signaling, " signaling network")
+      }
+      legend.name <- "Communication Prob."
+    }
+    else if (!is.null(measure)) {
+      net.diff <- object@net[[measure]]
+      if (measure == "count") {
+        if (is.null(title.name)) {
+          title.name = "Number of interactions"
+        }
+      }
+      else if (measure == "weight") {
+        if (is.null(title.name)) {
+          title.name = "Interaction strength"
+        }
+      }
+      legend.name <- title.name
+    }
+  }
+  net <- net.diff
+  if ((!is.null(sources.use)) | (!is.null(targets.use))) {
+    df.net <- reshape2::melt(net, value.name = "value")
+    colnames(df.net)[1:2] <- c("source", "target")
+    if (!is.null(sources.use)) {
+      if (is.numeric(sources.use)) {
+        sources.use <- rownames(net.diff)[sources.use]
+      }
+      df.net <- subset(df.net, source %in% sources.use)
+    }
+    if (!is.null(targets.use)) {
+      if (is.numeric(targets.use)) {
+        targets.use <- rownames(net.diff)[targets.use]
+      }
+      df.net <- subset(df.net, target %in% targets.use)
+    }
+    cells.level <- rownames(net.diff)
+    df.net$source <- factor(df.net$source, levels = cells.level)
+    df.net$target <- factor(df.net$target, levels = cells.level)
+    df.net$value[is.na(df.net$value)] <- 0
+    net <- tapply(df.net[["value"]], list(df.net[["source"]],
+                                          df.net[["target"]]), sum)
+  }
+  net[is.na(net)] <- 0
+  if (remove.isolate) {
+    idx1 <- which(Matrix::rowSums(net) == 0)
+    idx2 <- which(Matrix::colSums(net) == 0)
+    idx <- intersect(idx1, idx2)
+    if (length(idx) > 0) {
+      net <- net[-idx, ]
+      net <- net[, -idx]
+    }
+  }
+  mat <- net
+  if (is.null(color.use)) {
+    color.use <- scPalette(ncol(mat))
+  }
+  names(color.use) <- colnames(mat)
+  if (!is.null(row.show)) {
+    mat <- mat[row.show, ]
+  }
+  if (!is.null(col.show)) {
+    mat <- mat[, col.show]
+    color.use <- color.use[col.show]
+  }
+  if (min(mat) < 0) {
+    color.heatmap.use = colorRamp3(c(min(mat), 0, max(mat)),
+                                   c(color.heatmap[1], "#f7f7f7", color.heatmap[2]))
+    colorbar.break <- c(round(min(mat, na.rm = T), digits = nchar(sub(".*\\.(0*).*",
+                                                                      "\\1", min(mat, na.rm = T))) + 1), 0, round(max(mat,
+                                                                                                                      na.rm = T), digits = nchar(sub(".*\\.(0*).*", "\\1",
+                                                                                                                                                     max(mat, na.rm = T))) + 1))
+  }
+  else {
+    if (length(color.heatmap) == 3) {
+      color.heatmap.use = colorRamp3(c(0, min(mat), max(mat)),
+                                     color.heatmap)
+    }
+    else if (length(color.heatmap) == 2) {
+      color.heatmap.use = colorRamp3(c(min(mat), max(mat)),
+                                     color.heatmap)
+    }
+    else if (length(color.heatmap) == 1) {
+      color.heatmap.use = (grDevices::colorRampPalette((RColorBrewer::brewer.pal(n = 9,
+                                                                                 name = color.heatmap))))(100)
+    }
+    colorbar.break <- c(round(min(mat, na.rm = T), digits = nchar(sub(".*\\.(0*).*",
+                                                                      "\\1", min(mat, na.rm = T))) + 1), round(max(mat,
+                                                                                                                   na.rm = T), digits = nchar(sub(".*\\.(0*).*", "\\1",
+                                                                                                                                                  max(mat, na.rm = T))) + 1))
+  }
+  df <- data.frame(group = colnames(mat))
+  rownames(df) <- colnames(mat)
+  col_annotation <- HeatmapAnnotation(df = df, col = list(group = color.use),
+                                      which = "column", show_legend = FALSE, show_annotation_name = FALSE,
+                                      simple_anno_size = grid::unit(0.2, "cm"))
+  row_annotation <- HeatmapAnnotation(df = df, col = list(group = color.use),
+                                      which = "row", show_legend = FALSE, show_annotation_name = FALSE,
+                                      simple_anno_size = grid::unit(0.2, "cm"))
+  ha1 = rowAnnotation(Strength = anno_barplot(rowSums(abs(mat)),
+                                              border = FALSE, gp = gpar(fill = color.use, col = color.use)),
+                      show_annotation_name = FALSE)
+  ha2 = HeatmapAnnotation(Strength = anno_barplot(colSums(abs(mat)),
+                                                  border = FALSE, gp = gpar(fill = color.use, col = color.use)),
+                          show_annotation_name = FALSE)
+  if (sum(abs(mat) > 0) == 1) {
+    color.heatmap.use = c("white", color.heatmap.use)
+  }
+  else {
+    mat[mat == 0] <- NA
+  }
+  ht1 = Heatmap(mat, col = circlize::colorRamp2(0:8 / (8/maximum), c("#FFF5F0", "#FEE0D2", "#FCBBA1", "#FC9272", "#FB6A4A", "#EF3B2C", "#CB181D", "#A50F15", "#67000D")), na_col = "white",
+                name = legend.name, bottom_annotation = col_annotation,
+                left_annotation = row_annotation, top_annotation = ha2,
+                right_annotation = ha1, cluster_rows = cluster.rows,
+                cluster_columns = cluster.rows, row_names_side = "left",
+                row_names_rot = 0, row_names_gp = gpar(fontsize = font.size),
+                column_names_gp = gpar(fontsize = font.size), column_title = title.name,
+                column_title_gp = gpar(fontsize = font.size.title), column_names_rot = 90,
+                row_title = "Sources (Sender)", row_title_gp = gpar(fontsize = font.size.title),
+                row_title_rot = 90, heatmap_legend_param = list(title_gp = gpar(fontsize = 8,
+                                                                                fontface = "plain"), title_position = "leftcenter-rot",
+                                                                border = NA, legend_height = unit(20, "mm"), labels_gp = gpar(fontsize = 8),
+                                                                grid_width = unit(2, "mm")))
+  return(ht1)
+}
+```
+
+# CellChat: All Groups
+[CellChat^1^](http://www.cellchat.org/) v2.1.1 is an R package that is able to infer cell-cell communication using single-cell RNA-seq data.  The gene expression is compared to a CellChat curated database of known ligand, receptor, and cofactor interactions.  The CellChat v2 database contains ~3,300 validated molecular interactions.  
+
+CellChat processing starts by identifying over expressed genes and interactions and projecting that information onto a Protein-Protein Interaction network (PPI).  Biologically significant cell-cell communication interactions are assigned a probability value by modeling gene expression normalized using a method called trimean with prior knowledge of interactions using the law of mass action.  Once probability has been calculated permutation testing is performed.  Cell-cell communications were filtered out if there were fewer than 10 cells in the comparison.  The parameter `population.size = TRUE` was used for this calculation meaning that CellChat took into account that this data is a population of cells as opposed to a subset of cell-sorted cells.
+
+CellChat analysis was performed on <font color=`r colors[params$timepoint]`> **trimester `r params$timepoint`**</font> HBV-infected subjects that experienced a flare **before** birth, **after** birth, HBV-infected subjects **without** a flare, and **uninfected** subjects.  
+
+
+```{r create cellchat object}
+# CellChat object created via another script "01_installCellChat_split_Bcells.R"
+# Combine all 4 objects to increase power https://github.com/jinworks/CellChat/issues/62
+cellchat.control <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_control_cellchat.rds"))))
+cellchat.before <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_before_cellchat.rds"))))
+cellchat.after <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_after_cellchat.rds"))))
+cellchat.without <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_without_cellchat.rds"))))
+
+object.list <- list(after = cellchat.after, before = cellchat.before, uninfected = cellchat.control, without = cellchat.without)
+
+cellchat <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_all_cellchat.rds"))))
+```
+
+# CellChat: `r params$pathway`
+
+## Heatmap
+
+Heatmaps for `r params$pathway` is provided to show the different communication probability for each flare group.
+
+```{r pathways, results='asis', fig.width=9}
+pathway <- params$pathway
+
+maximum <- max(sapply(object.list, function(x) {
+  tryCatch({
+    test <-netVisual_heatmap(x, signaling = pathway)
+    max(test@matrix, na.rm = T)
+  }, 
+  error=function(cond) {
+    0
+  })
+}))
+
+cat("###", pathway, "{-}\n\n")
+
+figures <- sapply(names(object.list), function(x) tryCatch({
+  netVisual_heatmap_edit(
+    object.list[[x]],
+    signaling = pathway,
+    title.name = paste(pathway, "signaling\n", x %>% str_to_title()),
+    maximum = maximum
+  )
+}, error = function(cond) {
+  
+}
+))
+
+if ((!sapply(figures, is.null)) %>% sum == 1 ){
+  print(figures[[which(!(sapply(figures, is.null)))]])
+}else {
+  
+  print(tryCatch({
+    netVisual_heatmap_edit(
+      object.list[['after']],
+      signaling = pathway,
+      title.name = paste(pathway, "signaling\n", 'After'),
+      maximum = maximum
+    )
+  }, error = function(cond) {
+    
+  })
+  + tryCatch({
+    netVisual_heatmap_edit(
+      object.list[['before']],
+      signaling = pathway,
+      title.name = paste(pathway, "signaling\n", 'Before'),
+      maximum = maximum
+    )
+  }, error = function(cond) {
+    
+  }) + tryCatch({
+    netVisual_heatmap_edit(
+      object.list[['uninfected']],
+      signaling = pathway,
+      title.name = paste(pathway, "signaling\n", 'Uninfected'),
+      maximum = maximum
+    )
+  }, error = function(cond) {
+    
+  })
+  + tryCatch({
+    netVisual_heatmap_edit(
+      object.list[['without']],
+      signaling = pathway,
+      title.name = paste(pathway, "signaling\n", 'Without'),
+      maximum = maximum
+    )
+  }, error = function(cond) {
+    
+  }))
+  
+}
+
+cat("\n\n")
+```
+
+## Signal contribution {.tabset .tabset-fade}
+
+The following plots show the contribution of each L-R pair to the `r params$pathway` signal across all cell types and `r params$source` to `r params$target`. Since each of the plots are showing the relative contribution and are not on a set scale, the signaling strength in two different flare groups can not be directly compared.
+
+```{r Signal Contribution, results='asis'}
+plotContribution <- function(group, cellchat) {
+  cat("\n\n")
+  cat("###", group, "{-}\n\n")
+  print(netAnalysis_contribution(cellchat, signaling=params$pathway, title=paste0(group, ' - Contribution of each L-R pair\n', params$pathway)) + netAnalysis_contribution(cellchat, signaling=params$pathway, sources.use='Mono', targets.use='Mono', title=paste0(group, ' - Contribution of each L-R pair\n', params$pathway, ' - ', params$source, ' to ', params$target)))
+  cat("\n\n")
+}
+
+plotContribution("After", cellchat.after)
+plotContribution("Before", cellchat.before)
+plotContribution("Uninfected", cellchat.control)
+plotContribution("Without", cellchat.without)
+
+
+```
+
+## Gene Expression {.tabset .tabset-fade}
+
+The violin plots show the expression level of each of the ligand-receptor pairs detected. Please note that the scale may change between the different flare groups.
+
+```{r Gene Expression, results='asis'}
+plotGE <- function(group, cellchat) {
+  cat("###", group, "{-}\n\n")
+  filename <-file.path(cellchat_path, paste0('GeneExpression_', group, '_', params$pathway, '.png'))
+  if (!file.exists(filename)) {
+    colors <- scPalette(cellchat@idents %>% levels %>% length)
+    names(colors) <- cellchat.after@idents %>% levels
+    
+    png(filename, width=1800, height=1800, res=300)
+    print(plotGeneExpression(cellchat, signaling=params$pathway, color.use=colors))
+    dev.off()
+  }
+  cat(paste0("![Gene Expression plot of ", params$pathway, " ligand-receptors for ", group, "](", filename, ")\n"))
+  cat("\n\n")
+}
+
+plotGE("After", cellchat.after)
+plotGE("Before", cellchat.before)
+plotGE("Uninfected", cellchat.control)
+plotGE("Without", cellchat.without)
+```
+
+## Inferred Signaling Network of L-R Pairs {.tabset .tabset-fade}
+
+The circle plots show the inferred signaling for each of the ligand-receptor pairs in the `r params$pathway` network.
+
+```{r Inferred Signaling Network, results='asis'}
+plotInferred <- function(group, cellchat) {
+  cat("###", group, "{.tabset .tabset-fade .tabset-pills -}\n\n")
+  enriched <- extractEnrichedLR(cellchat, signaling=params$pathway, geneLR.return=T)
+  
+  for (pair in enriched$pairLR$interaction_name) {
+    cat("####", pair, "{-}\n\n")
+    print(netVisual_individual(cellchat, signaling=params$pathway, pairLR.use=pair, layout='circle'))
+    cat("\n\n")
+    
+  }
+}
+
+plotInferred("After", cellchat.after)
+plotInferred("Before", cellchat.before)
+plotInferred("Uninfected", cellchat.control)
+plotInferred("Without", cellchat.without)
+
+```
+
+
+
+# Session Info
+```{r Session Info, attr.output='style="max-height: 500px;"'}
+#sessionInfo()
+devtools::session_info()
+```
+
+# References
+###### 1. Suoqin Jin et al., Inference and analysis of cell-cell communication using CellChat. Nature Communications, 12:1088 (2021). https://www.nature.com/articles/s41467-021-21246-9 {-}
+

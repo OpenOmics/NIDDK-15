@@ -1,0 +1,52 @@
+---
+title: "NIDDK-15 Preliminary Report"
+subtitle: "scRNA-seq, Patient Cellularity"
+author: "Vicky Chen"
+date: "`r Sys.Date()`"
+output:
+    html_document:
+        toc: true
+        toc_float:
+            collapsed: false
+        number_sections: true
+        code-fold: true
+        toc_depth: 3
+        fig_height: 8
+---
+
+<style>
+table {
+  white-space: nowrap;
+}
+</style>
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include=TRUE, message=FALSE, warning=FALSE, error=FALSE)
+```
+
+```{r libraries}
+library(knitr)
+library(dplyr)
+library(stringr)
+library(DT)
+library(magrittr)
+library(tidyverse)
+
+dir <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/"
+```
+
+Azimuth was used to make cell type calls using the PBMC reference and taking their level 2 labels. 
+
+# Cellularity Bar Plot per Patient
+
+```{r, results='asis'}
+for (filename in str_sort(Sys.glob(file.path(dir, 'CellTypeCount_l2_CRPatient_*_Barplot.png')), numeric = TRUE)) {
+  cat("## Patient ", strsplit(basename(filename), '_')[[1]][[4]])
+  cat("\n")
+  cat(paste0("![](", filename, ")\n"))
+  cat("\n")
+}
+```
+
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>

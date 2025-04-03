@@ -1,0 +1,156 @@
+---
+title: "NIDDK-15 CellChat Analysis"
+subtitle: "Trimester `r params$timepoint`: Ligand Receptor Preliminary Report"
+author: "Vicky Chen"
+date: "`r Sys.Date()`"
+output:
+    rmdformats::robobook:
+        lightbox: true
+        number_sections: true
+        code-fold: true
+        toc_depth: 3
+        fig_width: 8
+        fig_height: 8
+params:
+  timepoint: timepoint
+  path: path
+---
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include=TRUE, message=FALSE, warning=FALSE, error=FALSE)
+```
+
+```{r libraries}
+library(CellChat)
+library(Seurat)
+library(patchwork)
+library(ComplexHeatmap)
+library(DT)
+library(knitr)
+options(stringsAsFactors = FALSE)
+```
+
+
+```{r, include=FALSE}
+# Init Step to make sure that the dependencies are loaded
+data <- read.csv('/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/seurat_merge/B_cells/Bcells_1Tri_FCRL1_metadata.csv')
+htmltools::tagList(DT::datatable(data, extensions='Buttons', options=list(dom='lBfrtip', buttons = c('copy', 'csv', 'excel'), lengthMenu = list(c(10,25,50,-1), c(10,25,50,"All")))))
+
+```
+
+```{r settings}
+colors = list(`1`='#337AB7', `2`='#6AA84F', `3`='#A70505')
+```
+
+```{r paths}
+seurat_obj <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/analysis1/analysis1_subset.rds"
+# rename B-cells
+b_cells <- read.csv("/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/seurat_merge/B_cells/Bcells_1Tri_FCRL1_metadata.csv", row.names = 1)
+#cellchat_path <- paste0("/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/cellchat_BD/trimester", params$timepoint)
+cellchat_path <- file.path(params$path, paste0('trimester', params$timepoint))
+comparison <- c(2, 4) # 1 = after, 2 = before, 3 = control, 4 = without 
+```
+
+
+# CellChat: All Groups
+[CellChat^1^](http://www.cellchat.org/) v2.1.1 is an R package that is able to infer cell-cell communication using single-cell RNA-seq data.  The gene expression is compared to a CellChat curated database of known ligand, receptor, and cofactor interactions.  The CellChat v2 database contains ~3,300 validated molecular interactions.  
+
+CellChat processing starts by identifying over expressed genes and interactions and projecting that information onto a Protein-Protein Interaction network (PPI).  Biologically significant cell-cell communication interactions are assigned a probability value by modeling gene expression normalized using a method called trimean with prior knowledge of interactions using the law of mass action.  Once probability has been calculated permutation testing is performed.  Cell-cell communications were filtered out if there were fewer than 10 cells in the comparison.  The parameter `population.size = TRUE` was used for this calculation meaning that CellChat took into account that this data is a population of cells as opposed to a subset of cell-sorted cells.
+
+CellChat analysis was performed on <font color=`r colors[params$timepoint]`> **trimester `r params$timepoint`**</font> HBV-infected subjects that experienced a flare **before** birth, **after** birth, HBV-infected subjects **without** a flare, and **uninfected** subjects.  The overall section shows a comparison of all interactions and counts in a histogram and cell-cell communication for each flare group before, after, without, and uninfected.
+
+
+```{r create cellchat object}
+# CellChat object created via another script "01_installCellChat_split_Bcells.R"
+# Combine all 4 objects to increase power https://github.com/jinworks/CellChat/issues/62
+cellchat.control <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_control_cellchat.rds"))))
+cellchat.before <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_before_cellchat.rds"))))
+cellchat.after <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_after_cellchat.rds"))))
+cellchat.without <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_without_cellchat.rds"))))
+
+object.list <- list(after = cellchat.after, before = cellchat.before, control = cellchat.control, without = cellchat.without)
+
+cellchat <- readRDS(Sys.glob(file.path(cellchat_path, paste0("*", params$timepoint, "_all_cellchat.rds"))))
+```
+
+## Significant Ligand-Receptor Pair Interactions
+Significant communications between cell groups were predicted by CellChat by identifying over-expressed ligands and receptors for each cell group. The labels for each cell were randomly permuted and the communication probability between two cell groups calculated. After 100 permutations was performed, the original communication probability was compared against the probability distribution to determine its resulting p-value. CellChat calls a p-value less than 0.05 as significant.
+
+### FCRL1+ B Cells {.tabset .tabset-fade}
+
+All significant interactions for cell groups communicating with the FCRL1+ B cells were obtained for each of the flare groups.
+
+```{r, results='asis'}
+plotLR <- function(group, cellchat) {
+  cat("#### ", group, " {.tabset .tabset-fade .tabset-pills -}\n\n")
+  cat("##### Sender {-}\n\n")
+  print(netVisual_bubble(cellchat, sources.use='FCRL1+ B cells', title=paste0('Significant Communications for ', group, ' with FCRL1+ B cells as the Source')))
+  cat("\n\n")
+  cat("##### Receiver {-}\n\n")
+  print(netVisual_bubble(cellchat, targets.use='FCRL1+ B cells', title=paste0('Significant Communications for ', group, ' with FCRL1+ B cells as the Receiver')))
+  cat("\n\n")
+}
+plotLR("Uninfected", cellchat.control)
+plotLR("After", cellchat.after)
+plotLR("Before", cellchat.before)
+plotLR("Without", cellchat.without)
+
+```
+
+### All Groups
+
+The significant interactions for all cell groups with Mono and CD4 T as a source and CD4 T and NK as targets are plotted.
+
+```{r, results='asis'}
+netVisual_bubble(cellchat, sources.use=c('Mono', 'CD4 T'), targets.use=c('CD4 T', 'NK'), comparison=c(1,2,3, 4))
+```
+
+
+## All Inferred Ligand-Receptor Pair Interactions {.tabset .tabset-fade}
+It is possible to pull out all of the inferred communications predicted by CellChat. The significant interactions figures only include those that have a p-value less than 0.05. The tables below are returning interactions between all cell types without setting any p-value threshold. 
+
+```{r, results='asis'}
+getCommnication <- function(group, cellchat) {
+  df.net <- subsetCommunication(cellchat, thresh=NULL)
+  df.net$prob <- round(df.net$prob, digits=4)
+  cat("\n\n")
+  cat("### ", group, "{-}\n\n")
+  print(htmltools::tagList(DT::datatable(df.net, extensions='Buttons', rownames=FALSE, options=list(order = list(list(5, 'asc'), list(4, 'desc')), dom='lBfrtip', buttons = c('copy', 'csv', 'excel'), lengthMenu = list(c(10,25,50,-1), c(10,25,50,"All"))))))
+}
+
+getCommnication("Uninfected", cellchat.control)
+getCommnication("After", cellchat.after)
+getCommnication("Before", cellchat.before)
+getCommnication("Without", cellchat.without)
+```
+
+
+## Highest Contributing Signals {.tabset .tabset-fade}
+Using the predicted communication between different cell groups in the sample, it is possible to visualize which networks are the largest contributors to any incoming or outgoing signals of each cell group.
+
+```{r, results='asis',  fig.width=10,  fig.height=10}
+plotSignalingRole <- function(group, cellchat) {
+  cat("### ", group, " {.tabset .tabset-fade .tabset-pills -}\n\n")
+  cat("#### Outgoing {-}\n\n")
+  print(netAnalysis_signalingRole_heatmap(cellchat, pattern = "outgoing", height=(length(cellchat@netP$pathways) /4)+1))
+  cat("\n\n")
+  cat("#### Incoming {-}\n\n")
+  print(netAnalysis_signalingRole_heatmap(cellchat, pattern = "incoming", height=(length(cellchat@netP$pathways) /4)+1))
+  cat("\n\n")
+}
+plotSignalingRole("Uninfected", cellchat.control)
+plotSignalingRole("After", cellchat.after)
+plotSignalingRole("Before", cellchat.before)
+plotSignalingRole("Without", cellchat.without)
+
+```
+
+# Session Info
+```{r Session Info}
+sessionInfo()
+```
+
+# References
+###### 1. Suoqin Jin et al., Inference and analysis of cell-cell communication using CellChat. Nature Communications, 12:1088 (2021). https://www.nature.com/articles/s41467-021-21246-9 {-}
+
+

@@ -1,0 +1,63 @@
+---
+title: "NIDDK-15 Preliminary Report"
+subtitle: "scRNA-seq, Harmony Integration"
+author: "Vicky Chen"
+date: "`r Sys.Date()`"
+output:
+    html_document:
+        toc: true
+        toc_float:
+            collapsed: false
+        number_sections: true
+        code-fold: true
+        toc_depth: 3
+        fig_height: 8
+---
+
+<style>
+table {
+  white-space: nowrap;
+}
+</style>
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include=TRUE, message=FALSE, warning=FALSE, error=FALSE)
+```
+
+```{r libraries}
+library(knitr)
+library(dplyr)
+library(stringr)
+#library(DT)
+#library(magrittr)
+#library(tidyverse)
+
+dir <- "/Volumes/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/"
+```
+
+[Harmony^1^](https://portals.broadinstitute.org/harmony/) v0.1.1 was used to integrate all samples together by using time point and patient as batches. 
+
+# UMAP All Samples Integrated
+
+## Cell Type Label
+```{r}
+include_graphics(file.path(dir, 'Harmony_UMAP_PredictedCellTypeL2.png'))
+```
+
+## Cell Type Label Split by Group
+```{r}
+include_graphics(file.path(dir, 'Harmony_UMAP_RNA_cr.group_Split.png'))
+```
+
+# UMAP Plot Per Patient Splitting by Time Point
+
+```{r, results='asis'}
+for (filename in str_sort(Sys.glob(file.path(dir, 'Harmony_UMAP_RNA_*_Timepoint_Split.png')), numeric = TRUE)) {
+  cat("## ", strsplit(basename(filename), '_')[[1]][[4]])
+  cat("\n")
+  cat(paste0("![](", filename, ")\n"))
+  cat("\n")
+}
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>

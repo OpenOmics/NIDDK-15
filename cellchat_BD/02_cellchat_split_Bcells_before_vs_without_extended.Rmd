@@ -1,0 +1,362 @@
+---
+title: "NIDDK-15 CellChat Analysis"
+subtitle: "Trimester 1: Before vs Without"
+author: "Brittany Dulek"
+date: "`r Sys.Date()`"
+output:
+    html_document:
+        toc: true
+        toc_float:
+            collapsed: false
+        number_sections: true
+        code-fold: true
+        toc_depth: 3
+        fig_width: 8
+        fig_height: 8
+---
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include=TRUE, message=FALSE, warning=FALSE, error=FALSE)
+```
+
+```{r libraries}
+library(CellChat)
+library(Seurat)
+library(patchwork)
+library(ComplexHeatmap)
+library(DT)
+library(knitr)
+options(stringsAsFactors = FALSE)
+```
+
+```{r paths}
+seurat_obj <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/harmony/timepoint_patient/analysis1/analysis1_subset.rds"
+# rename B-cells
+b_cells <- read.csv("/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/count/merge_processing/seurat_merge/B_cells/Bcells_1Tri_FCRL1_metadata.csv", row.names = 1)
+cellchat_path <- "/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/cellchat_BD/trimester1/"
+comparison <- c(2, 4) # 1 = after, 2 = before, 3 = control, 4 = without 
+```
+
+# Annotated UMAPs {.tabset .tabset-fade}
+## Cell-Type Grouped {-}
+```{r annotated UMAP}
+seur <- readRDS(seurat_obj)
+
+seur <- AddMetaData(seur, b_cells)
+seur@meta.data <- seur@meta.data %>%
+  mutate(predicted.celltype.l1.split = coalesce(FCRL1, predicted.celltype.l1))
+
+# create umap of predicted.ids
+DimPlot(seur, reduction = 'umap', group.by = "predicted.celltype.l1.split")
+```
+
+## Cell-Type Split {-}
+```{r split annotated UMAP}
+# create umap of split on flare
+DimPlot(seur, reduction = 'umap', split.by = "cr.flare", group.by = "predicted.celltype.l1.split", ncol = 2)
+```
+
+## Clusters {-}
+```{r Cluster UMAP}
+# create umap of split on flare
+DimPlot(seur, reduction = 'umap')
+```
+
+## Cell Counts {-}
+```{r cell counts}
+table(seur@meta.data$predicted.celltype.l1.split, seur@meta.data$cr.flare)
+```
+
+```{r cleanup, results="hide"}
+# clean up large objects
+seur <- NULL
+gc()
+```
+
+# CellChat: All Groups
+[CellChat^1^](http://www.cellchat.org/) v2.1.1 is an R package that is able to infer cell-cell communication using single-cell RNA-seq data.  The gene expression is compared to a CellChat curated database of known ligand, receptor, and cofactor interactions.  The CellChat v2 database contains ~3,300 validated molecular interactions.  
+
+CellChat processing starts by identifying over expressed genes and interactions and projecting that information onto a Protein-Protein Interaction network (PPI).  Biologically significant cell-cell communication interactions are assigned a probability value by modeling gene expression normalized using a method called trimean with prior knowledge of interactions using the law of mass action.  Once probability has been calculated permutation testing is performed.  Cell-cell communications were filtered out if there were fewer than 10 cells in the comparison.  The parameter `population.size = TRUE` was used for this calculation meaning that CellChat took into account that this data is a population of cells as opposed to a subset of cell-sorted cells.
+
+CellChat analysis was performed on <font color=#337AB7>**trimester 1**</font> HBV-infected subjects that experienced a flare **before** pregnancy, **after** pregnancy, HBV-infected subjects **without** a flare, and **control** subjects.  The overall section shows a comparison of all interactions and counts in a histogram and cell-cell communication for each flare group before, after, without, and control.
+
+```{r create cellchat object}
+# CellChat object created via another script "01_installCellChat_split_Bcells.R"
+# Combine all 4 objects to increase power https://github.com/jinworks/CellChat/issues/62
+cellchat.control <- readRDS(paste0(cellchat_path, "Analysis1_control_cellchat.rds"))
+cellchat.before <- readRDS(paste0(cellchat_path, "Analysis1_before_cellchat.rds"))
+cellchat.after <- readRDS(paste0(cellchat_path, "Analysis1_after_cellchat.rds"))
+cellchat.without <- readRDS(paste0(cellchat_path, "Analysis1_without_cellchat.rds"))
+
+object.list <- list(after = cellchat.after, before = cellchat.before, control = cellchat.control, without = cellchat.without)
+
+cellchat <- readRDS(paste0(cellchat_path, "Analysis1_all_cellchat.rds"))
+```
+
+## Interaction Counts and Weights {.tabset .tabset-fade}
+For the *histogram tab* the histogram on the left contains the interaction count for each group of the flare groups.  The histogram on the right contains the total interaction strength for each group.  The interaction strength is the communication probability mentioned above.
+
+For the flare group tabs the circos plot shows the interactions between the different cell types looking only at the given flare group.  Each cell type is represented as a node with a unique color and the interaction as a line (edge) connecting cell types. At the end of each edge is an arrow indicating the direction of the interaction.  
+
+The *Interactions tab* will display a circos plot on the left denoting interaction counts between cell types and the circos plot on the right denoting interaction strength between cell types.  
+
+The *Weight Split on Cell Type tab* splits the interaction strength circos plot in the Interactions tab on cell type.  
+
+### Histogram {-}
+```{r Interaction Count and Weights Histogram, fig.width=12}
+gg1 <- compareInteractions(cellchat, show.legend = F, group = c(1:4))
+gg2 <- compareInteractions(cellchat, show.legend = F, group = c(1:4), measure = "weight")
+gg1 + gg2
+```
+
+### Control {.tabset .tabset-fade .tabset-pills -}
+#### Interactions {-}
+
+```{r control interactions}
+plotCellChat <- function(cellchat, flare){
+  groupSize <- as.numeric(table(cellchat@idents))
+  par(mfrow = c(1,2), xpd=TRUE)
+  netVisual_circle(cellchat@net$count, vertex.weight = groupSize, weight.scale = T, label.edge= F, title.name = paste0("Number of interactions: ", flare))
+  netVisual_circle(cellchat@net$weight, vertex.weight = groupSize, weight.scale = T, label.edge= F, title.name = paste0("Interaction weights/strength: ", flare))
+}
+
+plotCellChat(cellchat.control, "control")
+```
+
+#### Weight Split on Cell Type {-}
+```{r control Weight Split on Cell-Type}
+mat <- cellchat.control@net$weight
+groupSize <- as.numeric(table(cellchat.control@idents))
+par(mfrow = c(3,3), xpd=TRUE)
+for (i in 1:nrow(mat)) {
+  mat2 <- matrix(0, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+  mat2[i, ] <- mat[i, ]
+  netVisual_circle(mat2, vertex.weight = groupSize, weight.scale = T, edge.weight.max = max(mat), title.name = rownames(mat)[i])
+}
+```
+
+### Before {.tabset .tabset-fade .tabset-pills -}
+#### Interactions {-}
+```{r before interactions}
+plotCellChat(cellchat.before, "before")
+```
+
+#### Weight Split on Cell-Type {-}
+```{r before Weight Split on Cell-Type}
+mat <- cellchat.before@net$weight
+groupSize <- as.numeric(table(cellchat.before@idents))
+par(mfrow = c(3,3), xpd=TRUE)
+for (i in 1:nrow(mat)) {
+  mat2 <- matrix(0, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+  mat2[i, ] <- mat[i, ]
+  netVisual_circle(mat2, vertex.weight = groupSize, weight.scale = T, edge.weight.max = max(mat), title.name = rownames(mat)[i])
+}
+```
+
+### After {.tabset .tabset-fade .tabset-pills -}
+#### Interactions {-}
+```{r after interactions}
+plotCellChat(cellchat.after, "after")
+```
+
+#### Weight Split on Cell-Type {-}
+```{r after Weight Split on Cell-Type}
+mat <- cellchat.after@net$weight
+groupSize <- as.numeric(table(cellchat.after@idents))
+par(mfrow = c(3,3), xpd=TRUE)
+for (i in 1:nrow(mat)) {
+  mat2 <- matrix(0, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+  mat2[i, ] <- mat[i, ]
+  netVisual_circle(mat2, vertex.weight = groupSize, weight.scale = T, edge.weight.max = max(mat), title.name = rownames(mat)[i])
+}
+```
+
+### Without {.tabset .tabset-fade .tabset-pills -}
+#### Interactions {-}
+```{r without interactions}
+plotCellChat(cellchat.without, "without")
+```
+
+#### Weight Split on Cell-Type {-}
+```{r without Weight Split on Cell-Type}
+mat <- cellchat.without@net$weight
+groupSize <- as.numeric(table(cellchat.without@idents))
+par(mfrow = c(3,3), xpd=TRUE)
+for (i in 1:nrow(mat)) {
+  mat2 <- matrix(0, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+  mat2[i, ] <- mat[i, ]
+  netVisual_circle(mat2, vertex.weight = groupSize, weight.scale = T, edge.weight.max = max(mat), title.name = rownames(mat)[i])
+}
+```
+
+# CellChat: Before vs Without
+CellChat differential analysis compared <font color=#337AB7>**trimester 1**</font> HBV-infected subjects without a flare and HBV-infected subjects that experienced a flare before pregnancy.
+
+## Interaction Counts and Weights {.tabset .tabset-fade}
+Plots in this section will have the term differential indicating a subtraction between groups. The color <span style="color: red;">red</span> in the plots indicates <span style="color: red;">increased</span> signaling in the <span style="color: red;">without</span> group compared to the before group and the color <span style="color: blue;">blue</span> indicates <span style="color: blue;">decreased</span> signaling in the <span style="color: blue;">without</span> group compared to the before group.
+
+### Relative Circos Plot Comparison {-}
+The circos plot on the left shows the differential interaction counts between each cell type and on the right the differential interaction strength between each cell type.  The interaction lines (edges) have an arrow next to each cell type indicating the direction of the interaction.  
+
+As an example when looking at the differential interaction strength circos plot on the right there is a red line connecting the monocytes to FCRL1+ B cells.  This indicates that the interaction strength is **increased** in the **without** group compared to the before flare group.  The line width indicates the strength of the difference.  
+
+```{r Interaction Count and Weights Circlize, fig.width=12, fig.height=6}
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_diffInteraction(cellchat, weight.scale = T, comparison = comparison, title.name = )
+netVisual_diffInteraction(cellchat, weight.scale = T, measure = "weight", comparison = comparison)
+```
+
+### Relative Interaction Counts Heatmap {-}
+Interaction counts and weights seen in the circos plots are now shown as a heatmap.  The left heatmap is differential number of interactions and the right heatmap the differential interaction strength.  The cell type sending the  signal is on the y-axis and the cell type receiving the signal is on the x-axis.  
+
+The histogram on the top of the plots shows the absolute sum of the incoming signal and the histogram on the right shows the absolute sum of the outgoing signal for each cell type.
+
+As an example when monocytes are the sender and Other B cells are the receiver in the left heatmap the heatmap is red indicating an increase in the number of interactions in the without group.  If you then look at the right heatmap for the same comparison the heatmap is blue indicating a decrease in signaling strength in the without group.  This is an example that shows that increased signaling does not equal increased strength.
+
+```{r Interaction Count and Weights Heatmap, warning=FALSE, fig.width=12}
+gg1 <- netVisual_heatmap(cellchat, comparison = comparison)
+gg2 <- netVisual_heatmap(cellchat, measure = "weight", comparison = comparison)
+gg1 + gg2
+```
+
+## Sources and Targets {.tabset .tabset-fade}
+The *Full Comparison tab* shows outgoing and incoming interaction strength comparison for <font color=#337AB7>**trimester 1**</font> before (left) and without (right) flare groupings for each cell type.
+
+The cell type specific tabs show the differential signaling changes between before and without.  The plot is shown as a coordinate plane with 4 quadrants as shown in the image below.  Points in quadrant 1 will indicate increased incoming and outgoing signaling strength in the without group. Points in quadrant 3 will indicate increased incoming and outgoing signaling strength in the before group.  
+
+```{r quadrants, fig.align="center"}
+include_graphics("/data/NHLBI_IDSS/rawdata/NIDDK-15_temp/cellchat_BD/quadrants.jpg")
+```
+
+The point colors indicate if a signal was seen in both the before and without group, the before group only, or the without group only.  The shapes indicate whether the signal was seen in incoming and outgoing for both the before and without group (shared), incoming specific (for before or without, color will indicate which), outgoing specific (for before or without, color will indicate which), and incoming & outgoing specific (e.g. incoming in the before group only and outgoing in the without group only).
+
+For example if you look at the FCRL1+ B cells plot at the top of the plot in quadrant 1 will be a blue triangle labeled MIF.  The location of MIF in quadrant 1 of the coordinate plane of the plot indicates that incoming and outgoing signaling strength is higher in the without group.  The triangle indicates outgoing specific and the color indicates without specific.  This means that the outgoing signal was seen only in the without group.  This also means the incoming signal was seen in both the without and before groups.  Points other than black circles indicate that a signal was not present/detected in both groups.
+
+### Full Comparison {-}
+**Note the x-axis and y-axis scales.**
+```{r Interaction Comparison Sources and Targets, fig.width=10}
+num.link <- sapply(object.list, function(x) {rowSums(x@net$count) + colSums(x@net$count)-diag(x@net$count)})
+weight.MinMax <- c(min(num.link), max(num.link)) # control the dot size in the different datasets
+gg <- list()
+for (i in comparison) {
+  x <- match(i, comparison)
+  gg[[x]] <- netAnalysis_signalingRole_scatter(object.list[[i]], title = names(object.list)[i], weight.MinMax = weight.MinMax)
+}
+#> Signaling role analysis on the aggregated cell-cell communication network from all signaling pathways
+#> Signaling role analysis on the aggregated cell-cell communication network from all signaling pathways
+patchwork::wrap_plots(plots = gg)
+```
+
+### CD4 T-cells {-}
+```{r Interaction Comparison Sources and Targets CD4 T}
+netAnalysis_signalingChanges_scatter(cellchat, idents.use = "CD4 T", comparison = comparison)
+```
+
+### CD8 T-cells {-}
+```{r Interaction Comparison Sources and Targets CD8 T}
+netAnalysis_signalingChanges_scatter(cellchat, idents.use = "CD8 T", comparison = comparison)
+```
+
+### Monocytes {-}
+```{r Interaction Comparison Sources and Targets Mono}
+netAnalysis_signalingChanges_scatter(cellchat, idents.use = "Mono", comparison = comparison)
+```
+
+### FCRL1+ B cells {-}
+```{r Interaction Comparison Sources and Targets FCRL1+ B cells}
+netAnalysis_signalingChanges_scatter(cellchat, idents.use = "FCRL1+ B cells", comparison = comparison)
+```
+
+### Other B cells {-}
+```{r Interaction Comparison Sources and Targets Other B cells}
+netAnalysis_signalingChanges_scatter(cellchat, idents.use = "Other B cells", comparison = comparison)
+```
+
+## Conserved Signaling 
+### Functional Similarity {.tabset .tabset-fade}
+Sender and receiver similarity between the control and trimester 1 HBV-infected subjects that experienced a flare after pregnancy for signaling pathways. Rank similarity using Euclidean distances was also used to identify signaling networks with the largest differences between control and after groups.
+
+#### Full Clustering {-}
+```{r Functional Similarity Full Clustering, warning=FALSE, message=FALSE, results=FALSE}
+cellchat <- computeNetSimilarityPairwise(cellchat, type = "functional", comparison = comparison_sorted)
+cellchat <- netEmbedding(cellchat, type = "functional", comparison = comparison_sorted)
+cellchat <- netClustering(cellchat, type = "functional", comparison = comparison_sorted)
+
+netVisual_embeddingPairwise(cellchat, type = "functional", label.size = 3.5, comparison = comparison_sorted)
+```
+
+#### Rank Similarity {-}
+```{r Functional Similarity Rank Similarity, message=FALSE}
+rankSimilarity(cellchat, type = "functional", comparison1 = comparison_sorted)
+```
+
+### Structural Similarity {.tabset .tabset-fade}
+Signaling network structure similarity comparison.  Rank similarity using Euclidean distances was also used to identify signaling networks with the largest differences between ctrl and KO.
+
+#### Full Clustering {-}
+```{r Structural Similarity Full Clustering, message=FALSE}
+cellchat <- computeNetSimilarityPairwise(cellchat, type = "structural", comparison = comparison_sorted)
+cellchat <- netEmbedding(cellchat, type = "structural", comparison = comparison_sorted)
+cellchat <- netClustering(cellchat, type = "structural", comparison = comparison_sorted)
+
+netVisual_embeddingPairwise(cellchat, type = "structural", label.size = 3.5, comparison = comparison_sorted)
+```
+
+#### Split Clustering {-}
+```{r Structural Similarity Split Clustering, message=FALSE}
+netVisual_embeddingPairwiseZoomIn(cellchat, type = "structural", nCol = 2, comparison = comparison_sorted)
+```
+
+#### Rank Similarity {-}
+```{r Structural Similarity Rank Similarity, message=FALSE}
+rankSimilarity(cellchat, type = "structural", comparison1 = comparison_sorted)
+```
+
+## Context-Specific 
+
+### Information Flow
+Each signaling pathway is defined by the sum of communication probability for all pairs of cell groups in the inferred network.  The information flow is shown below with red indicating signaling pathways enriched in the control and blue indicating signaling pathways enriched in the after.
+
+```{r information flow, fig.width=10, fig.height=12, message=FALSE}
+gg1 <- rankNet(cellchat, mode = "comparison", stacked = T, do.stat = TRUE, comparison = comparison_sorted)
+gg2 <- rankNet(cellchat, mode = "comparison", stacked = F, do.stat = TRUE, comparison = comparison_sorted)
+gg1 + gg2
+```
+
+### Signaling Patterns {.tabset .tabset-fade}
+
+#### Outgoing {-}
+```{r Outgoing Signaling Patterns, fig.width=12, fig.height=12, message=FALSE}
+comp_1 <- comparison[1]
+comp_2 <- comparison[2]
+# combining all the identified signaling pathways from different datasets 
+pathway.union <- union(object.list[[comp_1]]@netP$pathways, object.list[[comp_2]]@netP$pathways)
+ht1 = netAnalysis_signalingRole_heatmap(object.list[[comp_1]], pattern = "outgoing", signaling = pathway.union, title = names(object.list)[comp_1], width = 12, height = 20, font.size = 7)
+ht2 = netAnalysis_signalingRole_heatmap(object.list[[comp_2]], pattern = "outgoing", signaling = pathway.union, title = names(object.list)[comp_2], width = 12, height = 20, font.size = 7)
+draw(ht1 + ht2, ht_gap = unit(0.5, "cm"))
+```
+
+#### Incoming {-}
+```{r Incoming Signaling Patterns, fig.width=12, fig.height=12, message=FALSE}
+ht1 = netAnalysis_signalingRole_heatmap(object.list[[comp_1]], pattern = "incoming", signaling = pathway.union, title = names(object.list)[comp_1], width = 12, height = 20, color.heatmap = "GnBu", font.size = 7)
+ht2 = netAnalysis_signalingRole_heatmap(object.list[[comp_2]], pattern = "incoming", signaling = pathway.union, title = names(object.list)[comp_2], width = 12, height = 20, color.heatmap = "GnBu", font.size = 7)
+draw(ht1 + ht2, ht_gap = unit(0.5, "cm"))
+```
+
+#### Overall {-}
+```{r Overall Signaing Patterns, fig.width=12, fig.height=12, message=FALSE}
+ht1 = netAnalysis_signalingRole_heatmap(object.list[[comp_1]], pattern = "all", signaling = pathway.union, title = names(object.list)[comp_1], width = 12, height = 20, color.heatmap = "OrRd", font.size = 7)
+ht2 = netAnalysis_signalingRole_heatmap(object.list[[comp_2]], pattern = "all", signaling = pathway.union, title = names(object.list)[comp_2], width = 12, height = 20, color.heatmap = "OrRd", font.size = 7)
+draw(ht1 + ht2, ht_gap = unit(0.5, "cm"))
+```
+
+
+# Session Info
+```{r Session Info}
+sessionInfo()
+```
+
+# References
+###### 1. Suoqin Jin et al., Inference and analysis of cell-cell communication using CellChat. Nature Communications, 12:1088 (2021). https://www.nature.com/articles/s41467-021-21246-9 {-}
+
+
